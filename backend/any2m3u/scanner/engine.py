@@ -4,7 +4,6 @@ import hashlib
 import json
 import logging
 import shutil
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from sqlalchemy import select
@@ -12,6 +11,7 @@ from ..config import get_settings
 from ..db import get_sessionmaker
 from ..m3u.filters import FileEntry
 from ..models import ScanCache, Source
+from ..utils.dates import utcnow_iso
 from .base import UpstreamError
 from .local import LocalAdapter
 from .webdav import WebDAVAdapter
@@ -66,7 +66,7 @@ async def _mark_status(source_id: int, status: str, error: str | None = None) ->
         if error is not None:
             src.last_error = error[:2000]
         if status in ("success", "failed"):
-            src.last_scan_at = datetime.now(timezone.utc).isoformat()
+            src.last_scan_at = utcnow_iso()
         await s.commit()
 
 
@@ -138,13 +138,13 @@ async def scan(source_id: int) -> None:
             if existing is None:
                 s.add(ScanCache(
                     source_id=source_id,
-                    scanned_at=datetime.now(timezone.utc).isoformat(),
+                    scanned_at=utcnow_iso(),
                     entry_count=count,
                     total_bytes=total,
                     entries_jsonl_path=str(final_path),
                 ))
             else:
-                existing.scanned_at = datetime.now(timezone.utc).isoformat()
+                existing.scanned_at = utcnow_iso()
                 existing.entry_count = count
                 existing.total_bytes = total
                 existing.entries_jsonl_path = str(final_path)

@@ -1,7 +1,6 @@
 from __future__ import annotations
 import json
 import time
-from datetime import datetime, timezone
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +17,7 @@ from ..schemas import (
 )
 from ..scanner.engine import build_adapter, get_progress, scan
 from ..scanner.base import UpstreamAuthError, UpstreamError
+from ..utils.dates import utcnow_iso
 
 router = APIRouter(prefix="/api/sources", tags=["sources"])
 
@@ -44,7 +44,7 @@ async def create_source(body: SourceCreate, _: User = Depends(current_user), s: 
         name=body.name, type=body.type, config_json=json.dumps(body.config),
         group_by_dir=1 if body.group_by_dir else 0,
         refresh_cron=body.refresh_cron, enabled=1 if body.enabled else 0,
-        created_at=datetime.now(timezone.utc).isoformat(),
+        created_at=utcnow_iso(),
     )
     s.add(src); await s.commit(); await s.refresh(src)
     return _to_out(src)
