@@ -34,7 +34,10 @@ async def _auth_pull(token: str | None, auth_header: str | None) -> PullToken:
             raise HTTPException(status_code=401, detail="invalid token",
                                 headers={"WWW-Authenticate": _BEARER_CHALLENGE})
         if row.expires_at:
-            if datetime.fromisoformat(row.expires_at) < datetime.now(timezone.utc):
+            exp = datetime.fromisoformat(row.expires_at)
+            if exp.tzinfo is None:
+                exp = exp.replace(tzinfo=timezone.utc)
+            if exp < datetime.now(timezone.utc):
                 raise HTTPException(status_code=401, detail="expired token",
                                     headers={"WWW-Authenticate": _BEARER_CHALLENGE})
         row.last_used_at = datetime.now(timezone.utc).isoformat()

@@ -25,12 +25,47 @@ def _set_cookie(resp: Response, sid: str, secure: bool = False) -> None:
 
 
 @router.get("/me")
-async def me(s: AsyncSession = Depends(db_session)):
-    """Return 404 with code=not_initialized if no users exist, else 401 if not logged in."""
+async def me(
+    s: AsyncSession = Depends(db_session),
+    session_id: str | None = Cookie(default=None, alias=COOKIE_NAME),
+):
+    """Return the logged-in user, or signal not-initialized / not-logged-in.
+
+    If a valid cookie session exists, return the user. Otherwise return
+    404 (not initialized) or 401 (needs login) so the frontend can route
+    to the correct page.
+    """
+    # Check if any user exists (first-run detection)
     res = await s.execute(select(User).limit(1))
     if res.first() is None:
         raise HTTPException(status_code=404, detail={"code": "not_initialized"})
+
+    # Try the session cookie
+    if session_id:
+        row = await s.get(DBSession, session_id)
+        if row is not None:
+            from datetime import datetime, timezone
+            expires = _parse_expires(row.expires_at)
+            if expires >= datetime.now(timezone.utc):
+                user = await s.get(User, row.user_id)
+                if user is not None:
+                    # sliding renewal
+                    row.expires_at = (datetime.now(timezone.utc) + SESSION_TTL).isoformat()
+                    await s.commit()
+                    return {"username": user.username, "last_login_at": user.last_login_at}
+
     raise HTTPException(status_code=401, detail="not logged in")
+
+
+def _parse_expires(s: str):
+    """Parse a datetime stored as isoformat, handling old naive and new aware formats."""
+    from datetime import datetime, timezone
+    dt = datetime.fromisoformat(s)
+    if dt.tzinfo is None:
+        # Old naive format — treat as UTC
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
 
 
 @router.post("/login")

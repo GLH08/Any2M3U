@@ -19,7 +19,8 @@ async def test_first_run_setup_required(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_login_logout(tmp_path, monkeypatch):
+async def test_login_then_me(tmp_path, monkeypatch):
+    """After login, /me should return the user; after logout, 401."""
     monkeypatch.setenv("ANY2M3U_DATA", str(tmp_path))
     monkeypatch.setenv("ANY2M3U_ADMIN_PASSWORD", "secret123")
     app = create_app()
@@ -28,6 +29,12 @@ async def test_login_logout(tmp_path, monkeypatch):
             r = await c.post("/api/auth/login", json={"username": "admin", "password": "secret123"})
             assert r.status_code == 200
             assert "any2m3u_sid" in c.cookies
-            r3 = await c.post("/api/auth/logout")
-            assert r3.status_code == 204
-            assert "any2m3u_sid" not in c.cookies
+            # /me should return the user now
+            me = await c.get("/api/auth/me")
+            assert me.status_code == 200
+            assert me.json()["username"] == "admin"
+            # Logout
+            await c.post("/api/auth/logout")
+            # /me should return 401
+            me2 = await c.get("/api/auth/me")
+            assert me2.status_code == 401

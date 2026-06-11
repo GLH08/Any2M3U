@@ -28,6 +28,9 @@ async def current_user(
     if row is None:
         raise HTTPException(status_code=401, detail="invalid session")
     expires = datetime.fromisoformat(row.expires_at)
+    # Handle old naive isoformat strings from before the utcnow→now(timezone.utc) fix
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
     if expires < datetime.now(timezone.utc):
         raise HTTPException(status_code=401, detail="session expired")
     user = await s.get(User, row.user_id)
