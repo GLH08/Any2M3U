@@ -126,10 +126,11 @@ async def test_proxy_range_fallback_returns_200_when_upstream_ignores_range(
     from any2m3u.scanner import local
     orig = local.LocalAdapter.open_range
     async def fake_open_range(self, path, start, end):
-        # Simulate upstream returning 200: yield the whole file and tell the
-        # proxy the range was not honored.
-        _, full_iter = await orig(self, path, 0, None)
-        return (False, full_iter)
+        # Simulate upstream returning 200: yield the whole file regardless of
+        # the requested range. The proxy detects this by comparing body size
+        # to the requested range and falls back to 200.
+        async for chunk in orig(self, path, 0, None):
+            yield chunk
     monkeypatch.setattr(local.LocalAdapter, "open_range", fake_open_range)
 
     pr = await c.get(f"/proxy?token={token}&id={eid}", headers={"Range": "bytes=10-19"})

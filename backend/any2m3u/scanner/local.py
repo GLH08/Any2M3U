@@ -84,32 +84,30 @@ class LocalAdapter:
                     continue
                 yield FileEntry(path=rel, size=st.st_size, mtime=st.st_mtime)
 
-    async def open_range(self, path: str, start: int, end: int | None) -> tuple[bool, AsyncIterator[bytes]]:
-        """Return (range_supported, iterator). Local files always honor Range."""
-        async def _gen() -> AsyncIterator[bytes]:
-            full = self._resolve(path)
-            if not full.is_file():
-                raise FileNotFoundError(path)
-            import aiofiles
-            async with aiofiles.open(full, "rb") as f:
-                await f.seek(start)
-                remaining = (end - start + 1) if end is not None else None
-                chunk = 64 * 1024
-                while True:
-                    if remaining is not None and remaining <= 0:
-                        break
-                    size = chunk if remaining is None else min(chunk, remaining)
-                    data = await f.read(size)
-                    if not data:
-                        break
-                    if remaining is not None:
-                        remaining -= len(data)
-                    yield data
-        return (True, _gen())
+    async def open_range(self, path: str, start: int, end: int | None) -> AsyncIterator[bytes]:
+        """Yield bytes [start:end+1] from a local file. Range is always honored."""
+        full = self._resolve(path)
+        if not full.is_file():
+            raise FileNotFoundError(path)
+
+        import aiofiles
+        async with aiofiles.open(full, "rb") as f:
+            await f.seek(start)
+            remaining = (end - start + 1) if end is not None else None
+            chunk = 64 * 1024
+            while True:
+                if remaining is not None and remaining <= 0:
+                    break
+                size = chunk if remaining is None else min(chunk, remaining)
+                data = await f.read(size)
+                if not data:
+                    break
+                if remaining is not None:
+                    remaining -= len(data)
+                yield data
 
     async def open_full(self, path: str) -> AsyncIterator[bytes]:
-        _, gen = await self.open_range(path, 0, None)
-        async for c in gen:
+        async for c in self.open_range(path, 0, None):
             yield c
 
     async def ping(self) -> None:

@@ -81,7 +81,9 @@ async def delete_source(sid: int, _: User = Depends(current_user), s: AsyncSessi
     sync_source_schedule(sid, False, None)
     from ..scanner.engine import remove_source_from_index
     await remove_source_from_index(sid)
-    # Also remove the on-disk scan cache files (and any leftover .tmp).
+    # Delete the DB row first; only unlink disk files on success so a
+    # failed DB delete doesn't leave the Source row pointing at missing files.
+    await s.delete(src); await s.commit()
     from ..config import get_settings
     scan_dir = get_settings().scan_dir
     for ext in (".jsonl", ".jsonl.tmp"):
@@ -91,7 +93,6 @@ async def delete_source(sid: int, _: User = Depends(current_user), s: AsyncSessi
                 p.unlink()
             except OSError:
                 pass
-    await s.delete(src); await s.commit()
 
 
 @router.post("/{sid}/test", response_model=SourceTestResponse)

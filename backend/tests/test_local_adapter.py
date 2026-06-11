@@ -47,8 +47,7 @@ async def test_path_traversal_blocked(tmp_path):
     (tmp_path / "ok.mp4").write_bytes(b"x")
     a = LocalAdapter(str(tmp_path))
     with pytest.raises(PermissionError):
-        _, gen = await a.open_range("../etc/passwd", 0, 10)
-        async for _ in gen:
+        async for _ in a.open_range("../etc/passwd", 0, 10):
             pass
 
 
@@ -58,9 +57,7 @@ async def test_open_range(tmp_path):
     f.write_bytes(b"0123456789")
     a = LocalAdapter(str(tmp_path))
     chunks = []
-    supported, gen = await a.open_range("f.bin", 2, 5)
-    assert supported is True
-    async for c in gen:
+    async for c in a.open_range("f.bin", 2, 5):
         chunks.append(c)
     assert b"".join(chunks) == b"2345"
 

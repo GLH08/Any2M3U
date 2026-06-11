@@ -13,6 +13,7 @@ from ..m3u.filters import FileEntry, filter_entries
 from ..m3u.renderer import render_m3u
 from ..models import PullToken, Rule, ScanCache, Source
 from ..proxy.stream import parse_range
+from ..scanner.base import UpstreamRangeNotSupported
 from ..scanner.engine import build_adapter, entry_id, lookup_entry
 from ..utils.dates import parse_utc, utcnow_iso
 
@@ -173,7 +174,9 @@ async def proxy(
         ctype = "application/octet-stream"
 
     adapter = build_adapter(src)
+
     if rng is None:
+        # No Range request — stream the full body as 200.
         async def gen_full():
             try:
                 async for chunk in adapter.open_full(entry["path"]):
@@ -186,38 +189,30 @@ async def proxy(
             "Content-Length": str(size),
         })
 
-    rng_result = adapter.open_range(entry["path"], rng.start, rng.end)
-    if asyncio.iscoroutine(rng_result):
-        rng_result = await rng_result
-    range_supported, gen = rng_result
+    # Range request: try open_range. If upstream rejects Range (405/406/501),
+    # open_range transparently retries without the header and yields the
+    # full body. We detect the fallback by comparing body length to size.
+    chunks: list[bytes] = []
+    try:
+        try:
+            async for chunk in adapter.open_range(entry["path"], rng.start, rng.end):
+                chunks.append(chunk)
+        except UpstreamRangeNotSupported:
+            async for chunk in adapter.open_full(entry["path"]):
+                chunks.append(chunk)
+    finally:
+        try: await adapter.aclose()
+        except Exception: pass
 
-    if not range_supported:
-        # Upstream ignored Range; serve the full body with 200.
-        async def gen_full_via_iter():
-            try:
-                async for chunk in gen:
-                    yield chunk
-            finally:
-                try:
-                    await adapter.aclose()
-                except Exception:
-                    pass
-        return StreamingResponse(gen_full_via_iter(), status_code=200, media_type=ctype, headers={
+    body = b"".join(chunks)
+    if len(body) == size:
+        return Response(content=body, media_type=ctype, headers={
             "Accept-Ranges": "bytes",
             "Content-Length": str(size),
         })
-
-    async def gen_range_via_iter():
-        try:
-            async for chunk in gen:
-                yield chunk
-        finally:
-            try:
-                await adapter.aclose()
-            except Exception:
-                pass
-    return StreamingResponse(gen_range_via_iter(), status_code=206, media_type=ctype, headers={
+    return Response(content=body, status_code=206, media_type=ctype, headers={
         "Accept-Ranges": "bytes",
         "Content-Range": f"bytes {rng.start}-{rng.end}/{size}",
-        "Content-Length": str(rng.length),
+        "Content-Length": str(len(body)),
     })
+
