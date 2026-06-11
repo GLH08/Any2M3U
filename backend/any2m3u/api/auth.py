@@ -83,11 +83,25 @@ class PasswordBody(BaseModel):
 
 
 @router.post("/password")
-async def change_password(body: PasswordBody, user: User = Depends(current_user), s: AsyncSession = Depends(db_session)):
+async def change_password(
+    body: PasswordBody,
+    user: User = Depends(current_user),
+    s: AsyncSession = Depends(db_session),
+    session_id: str | None = Cookie(default=None, alias=COOKIE_NAME),
+):
     if not verify_password(body.old, user.password_hash):
         raise HTTPException(status_code=400, detail="wrong current password")
     if len(body.new) < 8:
         raise HTTPException(status_code=400, detail="password must be at least 8 chars")
     user.password_hash = hash_password(body.new)
+    # Invalidate every other session for this user; keep the current one
+    # so the user isn't logged out by their own password change.
+    from sqlalchemy import delete
+    await s.execute(
+        delete(DBSession).where(
+            DBSession.user_id == user.id,
+            DBSession.id != session_id,
+        )
+    )
     await s.commit()
     return {"ok": True}
