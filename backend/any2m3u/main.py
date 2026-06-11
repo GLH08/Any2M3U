@@ -2,7 +2,7 @@ from __future__ import annotations
 import logging
 import secrets
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
@@ -46,7 +46,7 @@ async def _bootstrap_admin() -> None:
         sess.add(User(
             username="admin",
             password_hash=hash_password(pw),
-            created_at=datetime.utcnow().isoformat(),
+            created_at=datetime.now(timezone.utc).isoformat(),
         ))
         await sess.commit()
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 import json
 import mimetypes
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response, StreamingResponse
@@ -34,10 +34,10 @@ async def _auth_pull(token: str | None, auth_header: str | None) -> PullToken:
             raise HTTPException(status_code=401, detail="invalid token",
                                 headers={"WWW-Authenticate": _BEARER_CHALLENGE})
         if row.expires_at:
-            if datetime.fromisoformat(row.expires_at) < datetime.utcnow():
+            if datetime.fromisoformat(row.expires_at) < datetime.now(timezone.utc):
                 raise HTTPException(status_code=401, detail="expired token",
                                     headers={"WWW-Authenticate": _BEARER_CHALLENGE})
-        row.last_used_at = datetime.utcnow().isoformat()
+        row.last_used_at = datetime.now(timezone.utc).isoformat()
         await s.commit()
         return row
 

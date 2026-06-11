@@ -4,7 +4,7 @@ import hashlib
 import json
 import logging
 import shutil
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from sqlalchemy import select
@@ -66,7 +66,7 @@ async def _mark_status(source_id: int, status: str, error: str | None = None) ->
         if error is not None:
             src.last_error = error[:2000]
         if status in ("success", "failed"):
-            src.last_scan_at = datetime.utcnow().isoformat()
+            src.last_scan_at = datetime.now(timezone.utc).isoformat()
         await s.commit()
 
 
@@ -138,13 +138,13 @@ async def scan(source_id: int) -> None:
             if existing is None:
                 s.add(ScanCache(
                     source_id=source_id,
-                    scanned_at=datetime.utcnow().isoformat(),
+                    scanned_at=datetime.now(timezone.utc).isoformat(),
                     entry_count=count,
                     total_bytes=total,
                     entries_jsonl_path=str(final_path),
                 ))
             else:
-                existing.scanned_at = datetime.utcnow().isoformat()
+                existing.scanned_at = datetime.now(timezone.utc).isoformat()
                 existing.entry_count = count
                 existing.total_bytes = total
                 existing.entries_jsonl_path = str(final_path)

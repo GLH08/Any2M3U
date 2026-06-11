@@ -1,7 +1,7 @@
 import json
 import os
 import pytest
-from datetime import datetime
+from datetime import datetime, timezone
 from any2m3u.db import init_db, get_sessionmaker
 from any2m3u.models import Source
 from any2m3u.scanner.engine import scan, load_index, is_index_loaded
@@ -22,7 +22,7 @@ async def test_scan_local_source(tmp_path):
 
     await init_db(data)
     sm = get_sessionmaker()
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     async with sm() as s:
         src = Source(name="m", type="local", config_json=json.dumps({"path": str(tmp_path / "media")}), created_at=now)
         s.add(src)
@@ -49,7 +49,7 @@ async def test_scan_keeps_old_on_failure(tmp_path):
 
     await init_db(data)
     sm = get_sessionmaker()
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     # path that does not exist
     async with sm() as s:
         src = Source(name="x", type="local", config_json=json.dumps({"path": str(tmp_path / "missing")}), created_at=now)

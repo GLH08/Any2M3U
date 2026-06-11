@@ -1,5 +1,5 @@
 from __future__ import annotations
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,7 +28,7 @@ async def list_tokens(_: User = Depends(current_user), s: AsyncSession = Depends
 async def create_token(body: TokenCreate, _: User = Depends(current_user), s: AsyncSession = Depends(db_session)):
     tok = new_pull_token()
     t = PullToken(name=body.name, token=tok, expires_at=body.expires_at,
-                  created_at=datetime.utcnow().isoformat())
+                  created_at=datetime.now(timezone.utc).isoformat())
     s.add(t); await s.commit(); await s.refresh(t)
     return TokenCreated(id=t.id, name=t.name, token=tok, expires_at=t.expires_at)
 

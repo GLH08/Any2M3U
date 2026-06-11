@@ -1,5 +1,5 @@
 from __future__ import annotations
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -39,7 +39,7 @@ async def login(body: LoginBody, request: Request, response: Response, s: AsyncS
     if not user or not verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=401, detail="invalid credentials")
     sid = await create_session(s, user.id, request.client.host if request.client else None)
-    user.last_login_at = datetime.utcnow().isoformat()
+    user.last_login_at = datetime.now(timezone.utc).isoformat()
     await s.commit()
     _set_cookie(response, sid)
     return {"username": user.username, "last_login_at": user.last_login_at}

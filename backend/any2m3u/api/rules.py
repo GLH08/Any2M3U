@@ -1,5 +1,5 @@
 from __future__ import annotations
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,7 +35,7 @@ async def create_rule(sid: int, body: RuleCreate, _: User = Depends(current_user
         exclude_keywords=body.exclude_keywords, include_paths=body.include_paths,
         group_title=body.group_title, tpl=body.tpl, logo_dir=body.logo_dir,
         enabled=1 if body.enabled else 0,
-        created_at=datetime.utcnow().isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
     )
     s.add(r); await s.commit(); await s.refresh(r)
     return _to_out(r)
