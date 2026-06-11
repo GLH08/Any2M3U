@@ -1,7 +1,6 @@
 from __future__ import annotations
 import json
 import time
-from datetime import datetime, timezone
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +17,8 @@ from ..schemas import (
 )
 from ..scanner.engine import build_adapter, get_progress, scan
 from ..scanner.base import UpstreamAuthError, UpstreamError
+from ..scheduler import add_job_for_source, remove_job_for_source
+from ..utils.dates import utcnow_iso
 
 router = APIRouter(prefix="/api/sources", tags=["sources"])
 
@@ -44,9 +45,11 @@ async def create_source(body: SourceCreate, _: User = Depends(current_user), s: 
         name=body.name, type=body.type, config_json=json.dumps(body.config),
         group_by_dir=1 if body.group_by_dir else 0,
         refresh_cron=body.refresh_cron, enabled=1 if body.enabled else 0,
-        created_at=datetime.now(timezone.utc).isoformat(),
+        created_at=utcnow_iso(),
     )
     s.add(src); await s.commit(); await s.refresh(src)
+    if src.enabled and src.refresh_cron:
+        add_job_for_source(src.id, src.refresh_cron)
     return _to_out(src)
 
 
@@ -67,6 +70,11 @@ async def update_source(sid: int, body: SourceUpdate, _: User = Depends(current_
     if body.refresh_cron is not None: src.refresh_cron = body.refresh_cron
     if body.enabled is not None: src.enabled = 1 if body.enabled else 0
     await s.commit(); await s.refresh(src)
+    # Re-evaluate scheduler state for this source
+    if src.enabled and src.refresh_cron:
+        add_job_for_source(src.id, src.refresh_cron)
+    else:
+        remove_job_for_source(src.id)
     return _to_out(src)
 
 
@@ -74,6 +82,9 @@ async def update_source(sid: int, body: SourceUpdate, _: User = Depends(current_
 async def delete_source(sid: int, _: User = Depends(current_user), s: AsyncSession = Depends(db_session)):
     src = await s.get(Source, sid)
     if not src: raise HTTPException(404, "not found")
+    remove_job_for_source(sid)
+    from ..scanner.engine import remove_source_from_index
+    remove_source_from_index(sid)
     await s.delete(src); await s.commit()
 
 

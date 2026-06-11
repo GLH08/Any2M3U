@@ -2,10 +2,14 @@ from __future__ import annotations
 import asyncio
 import os
 import posixpath
+import queue
 from pathlib import Path
-from typing import AsyncIterator
+from typing import AsyncIterator, Iterator
 from ..m3u.filters import FileEntry
 from .base import UpstreamError
+
+
+_SENTINEL: object = object()
 
 
 class LocalAdapter:
@@ -30,11 +34,30 @@ class LocalAdapter:
 
     async def list(self, path: str = "/") -> AsyncIterator[FileEntry]:
         start = self._resolve(path)
-        for entry in await asyncio.to_thread(self._walk, start):
-            yield entry
+        q: queue.Queue[FileEntry | object] = queue.Queue()
+        loop = asyncio.get_running_loop()
 
-    def _walk(self, start: Path) -> list[FileEntry]:
-        results: list[FileEntry] = []
+        def _pump() -> None:
+            try:
+                for entry in self._iter(start):
+                    loop.call_soon_threadsafe(q.put, entry)
+            finally:
+                loop.call_soon_threadsafe(q.put, _SENTINEL)
+
+        loop.run_in_executor(None, _pump)
+        while True:
+            entry = await loop.run_in_executor(None, q.get)
+            if entry is _SENTINEL:
+                return
+            yield entry  # type: ignore[misc]
+
+    def _iter(self, start: Path) -> Iterator[FileEntry]:
+        """Walk `start` and yield FileEntry rows lazily.
+
+        Yielding per file keeps memory bounded even for trees with
+        millions of entries; the consumer (scan engine) writes to JSONL
+        as entries arrive.
+        """
         for dirpath, dirnames, filenames in os.walk(start, followlinks=False):
             # Prune dotfile dirs and symlink dirs in-place
             dirnames[:] = [
@@ -52,8 +75,7 @@ class LocalAdapter:
                     st = p.stat()
                 except OSError:
                     continue
-                results.append(FileEntry(path=rel, size=st.st_size, mtime=st.st_mtime))
-        return results
+                yield FileEntry(path=rel, size=st.st_size, mtime=st.st_mtime)
 
     async def open_range(self, path: str, start: int, end: int | None) -> AsyncIterator[bytes]:
         full = self._resolve(path)

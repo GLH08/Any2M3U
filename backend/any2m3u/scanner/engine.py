@@ -4,7 +4,6 @@ import hashlib
 import json
 import logging
 import shutil
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from sqlalchemy import select
@@ -12,6 +11,7 @@ from ..config import get_settings
 from ..db import get_sessionmaker
 from ..m3u.filters import FileEntry
 from ..models import ScanCache, Source
+from ..utils.dates import utcnow_iso
 from .base import UpstreamError
 from .local import LocalAdapter
 from .webdav import WebDAVAdapter
@@ -23,6 +23,10 @@ _progress: dict[int, int] = {}
 _index: dict[int, dict[str, FileEntry]] = {}
 _sema = asyncio.Semaphore(1)
 
+# Flat global map for O(1) proxy lookup by entry id.
+# Populated on every successful scan and on load_all_indexes().
+_eid_to_entry: dict[str, tuple[int, FileEntry]] = {}
+
 
 def is_index_loaded(source_id: int) -> bool:
     return source_id in _index
@@ -32,8 +36,33 @@ def load_index(source_id: int) -> dict[str, FileEntry]:
     return _index.get(source_id, {})
 
 
+def lookup_entry(eid: str) -> tuple[int, FileEntry] | None:
+    """O(1) lookup of (source_id, entry) by entry id. Returns None if not found."""
+    return _eid_to_entry.get(eid)
+
+
+def _rebuild_global_index() -> None:
+    """Recompute _eid_to_entry from the per-source _index dicts.
+
+    Called after a scan completes and during load_all_indexes.
+    """
+    new_map: dict[str, tuple[int, FileEntry]] = {}
+    for sid, idx in _index.items():
+        for eid, entry in idx.items():
+            new_map[eid] = (sid, entry)
+    _eid_to_entry.clear()
+    _eid_to_entry.update(new_map)
+
+
 def get_progress(source_id: int) -> int:
     return _progress.get(source_id, 0)
+
+
+def remove_source_from_index(source_id: int) -> None:
+    """Drop a source's entries from both _index and _eid_to_entry."""
+    _index.pop(source_id, None)
+    _progress.pop(source_id, None)
+    _rebuild_global_index()
 
 
 def entry_id(source_id: int, path: str) -> str:
@@ -66,7 +95,7 @@ async def _mark_status(source_id: int, status: str, error: str | None = None) ->
         if error is not None:
             src.last_error = error[:2000]
         if status in ("success", "failed"):
-            src.last_scan_at = datetime.now(timezone.utc).isoformat()
+            src.last_scan_at = utcnow_iso()
         await s.commit()
 
 
@@ -132,19 +161,20 @@ async def scan(source_id: int) -> None:
 
         _index[source_id] = new_index
         _progress[source_id] = count
+        _rebuild_global_index()
 
         async with sm() as s:
             existing = await s.get(ScanCache, source_id)
             if existing is None:
                 s.add(ScanCache(
                     source_id=source_id,
-                    scanned_at=datetime.now(timezone.utc).isoformat(),
+                    scanned_at=utcnow_iso(),
                     entry_count=count,
                     total_bytes=total,
                     entries_jsonl_path=str(final_path),
                 ))
             else:
-                existing.scanned_at = datetime.now(timezone.utc).isoformat()
+                existing.scanned_at = utcnow_iso()
                 existing.entry_count = count
                 existing.total_bytes = total
                 existing.entries_jsonl_path = str(final_path)
@@ -175,6 +205,7 @@ async def load_all_indexes() -> None:
                 _index[r.source_id] = idx
             except OSError:
                 continue
+    _rebuild_global_index()
 
 
 async def cleanup_tmp_files() -> None:

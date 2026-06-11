@@ -1,10 +1,11 @@
 from __future__ import annotations
-from datetime import datetime, timezone, timedelta
+from datetime import timedelta
 from fastapi import Cookie, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from .db import get_sessionmaker
 from .models import User, Session as DBSession
 from .security import new_session_id
+from .utils.dates import parse_utc, utcnow_iso
 
 COOKIE_NAME = "any2m3u_sid"
 SESSION_TTL = timedelta(days=30)
@@ -27,17 +28,13 @@ async def current_user(
     row = await s.get(DBSession, session_id)
     if row is None:
         raise HTTPException(status_code=401, detail="invalid session")
-    expires = datetime.fromisoformat(row.expires_at)
-    # Handle old naive isoformat strings from before the utcnow→now(timezone.utc) fix
-    if expires.tzinfo is None:
-        expires = expires.replace(tzinfo=timezone.utc)
-    if expires < datetime.now(timezone.utc):
+    if parse_utc(row.expires_at) < parse_utc(utcnow_iso()):
         raise HTTPException(status_code=401, detail="session expired")
     user = await s.get(User, row.user_id)
     if user is None:
         raise HTTPException(status_code=401, detail="user gone")
     # sliding renewal
-    row.expires_at = (datetime.now(timezone.utc) + SESSION_TTL).isoformat()
+    row.expires_at = (parse_utc(utcnow_iso()) + SESSION_TTL).isoformat()
     await s.commit()
     request.state.user = user
     return user
@@ -48,8 +45,8 @@ async def create_session(s: AsyncSession, user_id: int, ip: str | None) -> str:
     s.add(DBSession(
         id=sid,
         user_id=user_id,
-        created_at=datetime.now(timezone.utc).isoformat(),
-        expires_at=(datetime.now(timezone.utc) + SESSION_TTL).isoformat(),
+        created_at=utcnow_iso(),
+        expires_at=(parse_utc(utcnow_iso()) + SESSION_TTL).isoformat(),
         ip=ip,
     ))
     await s.commit()

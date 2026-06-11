@@ -19,6 +19,7 @@ from .models import User
 from .scheduler import register_all, shutdown as sched_shutdown
 from .scanner.engine import cleanup_tmp_files, load_all_indexes
 from .security import hash_password
+from .utils.dates import utcnow_iso
 
 log = logging.getLogger(__name__)
 
@@ -47,7 +48,7 @@ async def _bootstrap_admin() -> None:
         sess.add(User(
             username="admin",
             password_hash=hash_password(pw),
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=utcnow_iso(),
         ))
         await sess.commit()
 

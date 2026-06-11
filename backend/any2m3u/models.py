@@ -1,13 +1,13 @@
 from __future__ import annotations
-from datetime import datetime, timezone
 from typing import Optional
 from sqlalchemy import String, Integer, ForeignKey, Text, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .db import Base
+from .utils.dates import utcnow_iso
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return utcnow_iso()
 
 
 class User(Base):

@@ -1,7 +1,6 @@
 from __future__ import annotations
 import json
 import mimetypes
-from datetime import datetime, timezone
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response, StreamingResponse
@@ -13,7 +12,8 @@ from ..m3u.filters import FileEntry, filter_entries
 from ..m3u.renderer import render_m3u
 from ..models import PullToken, Rule, ScanCache, Source
 from ..proxy.stream import parse_range
-from ..scanner.engine import build_adapter, entry_id, _index
+from ..scanner.engine import build_adapter, entry_id, lookup_entry
+from ..utils.dates import parse_utc, utcnow_iso
 
 router = APIRouter(tags=["public"])
 
@@ -33,14 +33,10 @@ async def _auth_pull(token: str | None, auth_header: str | None) -> PullToken:
         if row is None or row.revoked:
             raise HTTPException(status_code=401, detail="invalid token",
                                 headers={"WWW-Authenticate": _BEARER_CHALLENGE})
-        if row.expires_at:
-            exp = datetime.fromisoformat(row.expires_at)
-            if exp.tzinfo is None:
-                exp = exp.replace(tzinfo=timezone.utc)
-            if exp < datetime.now(timezone.utc):
-                raise HTTPException(status_code=401, detail="expired token",
-                                    headers={"WWW-Authenticate": _BEARER_CHALLENGE})
-        row.last_used_at = datetime.now(timezone.utc).isoformat()
+        if row.expires_at and parse_utc(row.expires_at) < parse_utc(utcnow_iso()):
+            raise HTTPException(status_code=401, detail="expired token",
+                                headers={"WWW-Authenticate": _BEARER_CHALLENGE})
+        row.last_used_at = utcnow_iso()
         await s.commit()
         return row
 
@@ -151,11 +147,7 @@ async def proxy(
     token: str | None = Query(default=None),
 ):
     pt = await _auth_pull(token, request.headers.get("Authorization"))
-    found = None
-    for sid, idx in _index.items():
-        if id in idx:
-            found = (sid, idx[id])
-            break
+    found = lookup_entry(id)
     if found is None:
         raise HTTPException(404, detail={"error": "not_found"})
     sid, entry = found
