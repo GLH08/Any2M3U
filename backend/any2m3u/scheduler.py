@@ -21,14 +21,46 @@ def _parse_cron(expr: str) -> CronTrigger:
     )
 
 
-async def register_all() -> None:
-    """Register a cron job for every enabled source that has a refresh_cron."""
+def _ensure_scheduler() -> AsyncIOScheduler:
     global _scheduler
     if _scheduler is None:
         _scheduler = AsyncIOScheduler()
         _scheduler.start()
-    for job in list(_scheduler.get_jobs()):
-        job.remove()
+    return _scheduler
+
+
+def add_job_for_source(source_id: int, cron_expr: str) -> None:
+    """Install (or replace) a cron job for the given source.
+
+    If cron_expr is empty or invalid, any existing job for this source is
+    removed and the call is a no-op.
+    """
+    sched = _ensure_scheduler()
+    job_id = f"scan-{source_id}"
+    if not cron_expr:
+        if sched.get_job(job_id):
+            sched.remove_job(job_id)
+        return
+    try:
+        trig = _parse_cron(cron_expr)
+    except Exception as e:
+        log.warning("invalid cron for source %s (%r): %s", source_id, cron_expr, e)
+        if sched.get_job(job_id):
+            sched.remove_job(job_id)
+        return
+    sched.add_job(scan, trig, args=[source_id],
+                  id=job_id, replace_existing=True)
+
+
+def remove_job_for_source(source_id: int) -> None:
+    sched = _ensure_scheduler()
+    job_id = f"scan-{source_id}"
+    if sched.get_job(job_id):
+        sched.remove_job(job_id)
+
+
+async def register_all() -> None:
+    """Register a cron job for every enabled source that has a refresh_cron."""
     sm = get_sessionmaker()
     async with sm() as s:
         rows = (await s.execute(
@@ -37,13 +69,7 @@ async def register_all() -> None:
         for src in rows:
             if not src.refresh_cron:
                 continue
-            try:
-                trig = _parse_cron(src.refresh_cron)
-            except Exception as e:
-                log.warning("invalid cron for source %s: %s", src.id, e)
-                continue
-            _scheduler.add_job(scan, trig, args=[src.id],
-                              id=f"scan-{src.id}", replace_existing=True)
+            add_job_for_source(src.id, src.refresh_cron)
 
 
 def shutdown() -> None:
