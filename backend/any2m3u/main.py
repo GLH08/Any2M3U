@@ -17,7 +17,7 @@ from .config import get_settings
 from .db import get_sessionmaker, init_db
 from .models import User
 from .scheduler import register_all, shutdown as sched_shutdown
-from .scanner.engine import cleanup_tmp_files, load_all_indexes
+from .scanner.engine import cleanup_tmp_files, load_all_indexes, reset_stale_running_scans
 from .security import hash_password
 from .utils.dates import utcnow_iso
 
@@ -59,6 +59,7 @@ async def _lifespan(app: FastAPI):
     await init_db(s.data_dir)
     await _bootstrap_admin()
     await cleanup_tmp_files()
+    await reset_stale_running_scans()
     await load_all_indexes()
     try:
         await register_all()

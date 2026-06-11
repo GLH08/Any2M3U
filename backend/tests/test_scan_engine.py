@@ -173,3 +173,67 @@ async def test_load_all_indexes_skips_corrupt_jsonl_line(tmp_path):
     eids = list(engine._index.get(sid, {}).keys())
     assert len(eids) == 1, f"expected 1 valid entry to survive corruption, got {len(eids)}"
     assert lookup_entry(eids[0]) is not None
+
+
+@pytest.mark.asyncio
+async def test_scan_marks_failed_on_cancellation(tmp_path):
+    """asyncio.CancelledError mid-scan must reset status to 'failed', not leave 'running'."""
+    import asyncio
+    from datetime import datetime, timezone
+    from unittest.mock import patch
+    from any2m3u.scanner.local import LocalAdapter
+
+    data = tmp_path / "data"; data.mkdir()
+    media = tmp_path / "media"
+    media.mkdir()
+    (media / "f.mp4").write_bytes(b"x")
+    os.environ["ANY2M3U_DATA"] = str(data)
+    from any2m3u.config import get_settings
+    get_settings.cache_clear()
+    await init_db(data)
+    sm = get_sessionmaker()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    async with sm() as s:
+        src = Source(name="m", type="local",
+                     config_json=json.dumps({"path": str(media)}), created_at=now_iso)
+        s.add(src); await s.commit(); await s.refresh(src)
+        sid = src.id
+
+    async def cancelled_list(self, path="/"):
+        raise asyncio.CancelledError()
+        yield  # pragma: no cover
+
+    with patch.object(LocalAdapter, "list", cancelled_list):
+        with pytest.raises(asyncio.CancelledError):
+            await scan(sid)
+
+    async with sm() as s:
+        src = await s.get(Source, sid)
+        assert src.last_scan_status == "failed", f"got {src.last_scan_status!r}"
+
+
+@pytest.mark.asyncio
+async def test_reset_stale_running_scans(tmp_path):
+    """Sources stuck in 'running' from a crashed process must be reset to 'failed' at startup."""
+    from datetime import datetime, timezone
+    from any2m3u.scanner.engine import reset_stale_running_scans
+
+    data = tmp_path / "data"; data.mkdir()
+    os.environ["ANY2M3U_DATA"] = str(data)
+    from any2m3u.config import get_settings
+    get_settings.cache_clear()
+    await init_db(data)
+    sm = get_sessionmaker()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    async with sm() as s:
+        src = Source(name="stuck", type="local", config_json=json.dumps({"path": "/tmp"}),
+                     created_at=now_iso, last_scan_status="running")
+        s.add(src); await s.commit(); await s.refresh(src)
+        sid = src.id
+
+    await reset_stale_running_scans()
+
+    async with sm() as s:
+        src = await s.get(Source, sid)
+        assert src.last_scan_status == "failed"
+        assert "interrupted" in (src.last_error or "")
