@@ -82,9 +82,19 @@ def create_app() -> FastAPI:
     async def health():
         return {"ok": True}
 
-    # Serve SPA static files (built Vue dist)
+    # Serve SPA static files (built Vue dist).
+    # We avoid app.mount("/") because StaticFiles returns 404 for unknown
+    # paths instead of falling back to index.html. Instead, add a catch-all
+    # GET that returns a real file or index.html for SPA client routes.
     if s.web_dir.exists():
-        app.mount("/", StaticFiles(directory=str(s.web_dir), html=True), name="web")
+        from fastapi.responses import FileResponse
+
+        @app.get("/{full_path:path}", include_in_schema=False)
+        async def spa_fallback(full_path: str):
+            candidate = s.web_dir / full_path
+            if candidate.is_file():
+                return FileResponse(candidate)
+            return FileResponse(s.web_dir / "index.html")
     else:
         log.warning("=" * 60)
         log.warning("Web UI directory not found: %s", s.web_dir)

@@ -18,4 +18,4 @@ COPY --from=frontend /web/dist /app/any2m3u/web
 ENV ANY2M3U_DATA=/data \
     ANY2M3U_WEB=/app/any2m3u/web
 EXPOSE 8000
-CMD ["uv", "run", "python", "-m", "any2m3u"]
+CMD ["uv", "run", "uvicorn", "any2m3u.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
