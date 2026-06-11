@@ -128,3 +128,48 @@ async def test_rescan_drops_stale_eids_from_global_map(tmp_path):
     await scan(sid)
     assert lookup_entry(eid_a) is not None  # still there
     assert lookup_entry(eid_b) is None        # dropped
+
+
+@pytest.mark.asyncio
+async def test_load_all_indexes_skips_corrupt_jsonl_line(tmp_path):
+    """A corrupted line in a scan cache JSONL must not abort load_all_indexes.
+    Remaining valid entries should still load and the global map must rebuild."""
+    from datetime import datetime, timezone
+    from any2m3u.scanner.engine import load_all_indexes, lookup_entry
+    from any2m3u.scanner import engine
+
+    data = tmp_path / "data"; data.mkdir()
+    media = tmp_path / "media"
+    media.mkdir()
+    (media / "good.mp4").write_bytes(b"x")
+    (media / "also_good.mp4").write_bytes(b"y")
+
+    os.environ["ANY2M3U_DATA"] = str(data)
+    from any2m3u.config import get_settings
+    get_settings.cache_clear()
+    await init_db(data)
+
+    sm = get_sessionmaker()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    async with sm() as s:
+        src = Source(name="m", type="local",
+                     config_json=json.dumps({"path": str(media)}), created_at=now_iso)
+        s.add(src); await s.commit(); await s.refresh(src)
+        sid = src.id
+
+    await scan(sid)
+
+    # Corrupt the first line of the JSONL cache.
+    cache_path = data / "scan" / f"{sid}.jsonl"
+    lines = cache_path.read_text(encoding="utf-8").splitlines()
+    lines[0] = "{ this is not valid json"
+    cache_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    # Reset in-memory state and reload.
+    engine._index.clear()
+    engine._eid_to_entry.clear()
+
+    await load_all_indexes()  # must not raise
+    eids = list(engine._index.get(sid, {}).keys())
+    assert len(eids) == 1, f"expected 1 valid entry to survive corruption, got {len(eids)}"
+    assert lookup_entry(eids[0]) is not None

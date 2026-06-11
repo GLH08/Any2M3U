@@ -199,9 +199,13 @@ async def load_all_indexes() -> None:
                         line = line.strip()
                         if not line:
                             continue
-                        e = json.loads(line)
-                        eid = entry_id(r.source_id, e["path"])
-                        idx[eid] = e
+                        try:
+                            e = json.loads(line)
+                            eid = entry_id(r.source_id, e["path"])
+                            idx[eid] = e
+                        except (ValueError, KeyError) as exc:
+                            log.warning("skipping corrupt cache line in %s: %s", p, exc)
+                            continue
                 _index[r.source_id] = idx
             except OSError:
                 continue
