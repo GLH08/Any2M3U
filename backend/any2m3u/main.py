@@ -4,6 +4,7 @@ import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from fastapi import FastAPI
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 from .api import auth as auth_api
@@ -84,6 +85,26 @@ def create_app() -> FastAPI:
     # Serve SPA static files (built Vue dist)
     if s.web_dir.exists():
         app.mount("/", StaticFiles(directory=str(s.web_dir), html=True), name="web")
+    else:
+        log.warning("=" * 60)
+        log.warning("Web UI directory not found: %s", s.web_dir)
+        log.warning("The API will work, but the management UI is not available.")
+        log.warning("Build the frontend: cd frontend && npm install && npm run build")
+        log.warning("=" * 60)
+
+        @app.get("/", include_in_schema=False)
+        async def no_ui_index():
+            return HTMLResponse(
+                f"<html><body style='font-family:sans-serif;max-width:640px;margin:48px auto;padding:0 16px'>"
+                f"<h1>Any2M3U — API only</h1>"
+                f"<p>The management UI has not been built. The API is working.</p>"
+                f"<p>To build the UI:</p>"
+                f"<pre>cd frontend &amp;&amp; npm install &amp;&amp; npm run build</pre>"
+                f"<p>Expected web dir: <code>{s.web_dir}</code></p>"
+                f"<p>Health: <a href='/api/health'>/api/health</a></p>"
+                f"</body></html>",
+                status_code=503,
+            )
     return app
 
 
