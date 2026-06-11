@@ -58,11 +58,17 @@ def get_progress(source_id: int) -> int:
     return _progress.get(source_id, 0)
 
 
-def remove_source_from_index(source_id: int) -> None:
-    """Drop a source's entries from both _index and _eid_to_entry."""
-    _index.pop(source_id, None)
-    _progress.pop(source_id, None)
-    _rebuild_global_index()
+async def remove_source_from_index(source_id: int) -> None:
+    """Drop a source's entries from both _index and _eid_to_entry.
+
+    Acquires the scan semaphore so it can't race with an in-flight scan
+    for the same source (a scan past the early-return guard would otherwise
+    re-populate _index[source_id] after this returns).
+    """
+    async with _sema:
+        _index.pop(source_id, None)
+        _progress.pop(source_id, None)
+        _rebuild_global_index()
 
 
 def entry_id(source_id: int, path: str) -> str:
@@ -143,6 +149,15 @@ async def scan(source_id: int) -> None:
                     if count % 200 == 0:
                         _progress[source_id] = count
             tmp_path.replace(final_path)
+        except asyncio.CancelledError:
+            log.warning("scan cancelled for source %s", source_id)
+            try:
+                if tmp_path.exists():
+                    tmp_path.unlink()
+            except OSError:
+                pass
+            await _mark_status(source_id, "failed", "cancelled")
+            raise
         except Exception as e:
             log.exception("scan failed for source %s", source_id)
             try:
@@ -183,6 +198,25 @@ async def scan(source_id: int) -> None:
         await _mark_status(source_id, "success")
 
 
+async def reset_stale_running_scans() -> None:
+    """Reset sources stuck in 'running' from a crashed process to 'failed'.
+
+    Called at startup: if the process died mid-scan (kill -9, OOM), the DB
+    still says 'running' and trigger_scan would 409 forever.
+    """
+    sm = get_sessionmaker()
+    async with sm() as s:
+        rows = (await s.execute(
+            select(Source).where(Source.last_scan_status == "running")
+        )).scalars().all()
+        for src in rows:
+            src.last_scan_status = "failed"
+            src.last_error = "interrupted by restart"
+            log.warning("reset stale running scan for source %s", src.id)
+        if rows:
+            await s.commit()
+
+
 async def load_all_indexes() -> None:
     """Rebuild in-memory indexes for all sources that have a scan cache."""
     sm = get_sessionmaker()
@@ -199,9 +233,13 @@ async def load_all_indexes() -> None:
                         line = line.strip()
                         if not line:
                             continue
-                        e = json.loads(line)
-                        eid = entry_id(r.source_id, e["path"])
-                        idx[eid] = e
+                        try:
+                            e = json.loads(line)
+                            eid = entry_id(r.source_id, e["path"])
+                            idx[eid] = e
+                        except (ValueError, KeyError) as exc:
+                            log.warning("skipping corrupt cache line in %s: %s", p, exc)
+                            continue
                 _index[r.source_id] = idx
             except OSError:
                 continue

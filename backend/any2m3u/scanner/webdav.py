@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import logging
 import posixpath
 import xml.etree.ElementTree as ET
@@ -190,32 +191,75 @@ class WebDAVAdapter:
                 if sd not in seen:
                     queue.append(sd)
 
-    async def open_range(self, path: str, start: int, end: int | None) -> AsyncIterator[bytes]:
-        """Stream bytes [start:end+1] from a file. If the upstream rejects
-        Range (405/406/501), silently retry without the Range header."""
+    async def open_range(self, path: str, start: int, end: int | None) -> tuple[bool, AsyncIterator[bytes]]:
+        """Return (range_supported, iterator).
+
+        For 405/406/501 upstream responses the range is not honored, so we
+        return (False, full_body_iterator) and the caller should respond
+        with HTTP 200 + full Content-Length, not 206.
+        """
         client = await self._ensure_client()
         url = self._file_url(path)
         rng = f"bytes={start}-{end}" if end is not None else f"bytes={start}-"
 
-        # First pass: try with Range.  If rejected, retry without.
+        last_error: BaseException | None = None
         for attempt, headers in enumerate(({"Range": rng}, {})):
-            try:
-                async with client.stream("GET", url, headers=headers) as r:
-                    if r.status_code in (401, 403):
-                        raise UpstreamAuthError(f"upstream {r.status_code}")
-                    if r.status_code in (405, 406, 501) and attempt == 0:
-                        log.info("upstream %s for Range — retrying full GET", r.status_code)
-                        continue  # retry without Range
-                    if r.status_code >= 400:
-                        raise UpstreamError(f"upstream {r.status_code}")
-                    async for chunk in r.aiter_bytes(chunk_size=64 * 1024):
-                        yield chunk
-                    return  # success — stop retry loop
-            except httpx.HTTPError as e:
-                if attempt == 0:
-                    log.info("HTTP error for Range — retrying full GET: %s", e)
-                    continue
-                raise UpstreamError(str(e))
+            queue: asyncio.Queue = asyncio.Queue()
+            supported = bool(headers.get("Range"))
+
+            async def _pump() -> None:
+                nonlocal last_error
+                try:
+                    async with client.stream("GET", url, headers=headers) as r:
+                        if r.status_code in (401, 403):
+                            raise UpstreamAuthError(f"upstream {r.status_code}")
+                        if r.status_code in (405, 406, 501) and attempt == 0:
+                            return  # signal retry
+                        if r.status_code >= 400:
+                            raise UpstreamError(f"upstream {r.status_code}")
+                        async for chunk in r.aiter_bytes(chunk_size=64 * 1024):
+                            await queue.put(chunk)
+                except (httpx.HTTPError, UpstreamError) as e:
+                    last_error = e
+                finally:
+                    await queue.put(None)  # end-of-stream marker
+
+            task = asyncio.create_task(_pump())
+            # Wait for the first non-None item, or None if stream ended empty.
+            first = await queue.get()
+            if first is None and attempt == 0:
+                # First attempt gave up → retry without Range
+                await task
+                continue
+            if first is None:
+                # No-Range attempt also empty
+                await task
+                if last_error:
+                    raise last_error
+                return (supported, _empty_iter())
+
+            async def _iter() -> AsyncIterator[bytes]:
+                try:
+                    yield first  # type: ignore[misc]
+                    while True:
+                        item = await queue.get()
+                        if item is None:
+                            return
+                        yield item  # type: ignore[misc]
+                finally:
+                    if not task.done():
+                        task.cancel()
+                        try:
+                            await task
+                        except (asyncio.CancelledError, Exception):
+                            pass
+
+            return (supported, _iter())
+
+        # Unreachable
+        if last_error:
+            raise last_error
+        raise UpstreamError("open_range: retries exhausted")
 
     async def open_full(self, path: str) -> AsyncIterator[bytes]:
         client = await self._ensure_client()
@@ -243,3 +287,8 @@ class WebDAVAdapter:
                 raise UpstreamError(f"HTTP {r.status_code}")
         except httpx.HTTPError as e:
             raise UpstreamError(str(e))
+
+
+async def _empty_iter() -> AsyncIterator[bytes]:
+    if False:
+        yield b""

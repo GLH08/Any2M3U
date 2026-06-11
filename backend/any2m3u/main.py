@@ -17,7 +17,7 @@ from .config import get_settings
 from .db import get_sessionmaker, init_db
 from .models import User
 from .scheduler import register_all, shutdown as sched_shutdown
-from .scanner.engine import cleanup_tmp_files, load_all_indexes
+from .scanner.engine import cleanup_tmp_files, load_all_indexes, reset_stale_running_scans
 from .security import hash_password
 from .utils.dates import utcnow_iso
 
@@ -44,13 +44,18 @@ async def _bootstrap_admin() -> None:
         log.warning("=" * 60)
         log.warning("Any2M3U initial admin password: %s", pw)
         log.warning("=" * 60)
+    from sqlalchemy.exc import IntegrityError
     async with sm() as sess:
         sess.add(User(
             username="admin",
             password_hash=hash_password(pw),
             created_at=utcnow_iso(),
         ))
-        await sess.commit()
+        try:
+            await sess.commit()
+        except IntegrityError:
+            # Another worker raced us and inserted 'admin' first. That's fine.
+            await sess.rollback()
 
 
 @asynccontextmanager
@@ -59,6 +64,7 @@ async def _lifespan(app: FastAPI):
     await init_db(s.data_dir)
     await _bootstrap_admin()
     await cleanup_tmp_files()
+    await reset_stale_running_scans()
     await load_all_indexes()
     try:
         await register_all()
@@ -92,10 +98,11 @@ def create_app() -> FastAPI:
 
         @app.get("/{full_path:path}", include_in_schema=False)
         async def spa_fallback(full_path: str):
-            candidate = s.web_dir / full_path
-            if candidate.is_file():
+            web_root = s.web_dir.resolve()
+            candidate = (web_root / full_path).resolve()
+            if web_root in candidate.parents and candidate.is_file():
                 return FileResponse(candidate)
-            return FileResponse(s.web_dir / "index.html")
+            return FileResponse(web_root / "index.html")
     else:
         log.warning("=" * 60)
         log.warning("Web UI directory not found: %s", s.web_dir)

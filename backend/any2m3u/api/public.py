@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import json
 import mimetypes
 from pathlib import Path
@@ -41,7 +42,7 @@ async def _auth_pull(token: str | None, auth_header: str | None) -> PullToken:
         return row
 
 
-def _load_entries(jsonl_path: str) -> list[FileEntry]:
+def _load_entries_sync(jsonl_path: str) -> list[FileEntry]:
     out: list[FileEntry] = []
     p = Path(jsonl_path)
     if not p.exists():
@@ -55,6 +56,12 @@ def _load_entries(jsonl_path: str) -> list[FileEntry]:
     return out
 
 
+async def _load_entries(jsonl_path: str) -> list[FileEntry]:
+    """Async wrapper that offloads the synchronous JSONL read+parse to a
+    worker thread so the event loop isn't blocked on large caches."""
+    return await asyncio.to_thread(_load_entries_sync, jsonl_path)
+
+
 @router.get("/m3u/rule/{rid}")
 async def m3u_for_rule(rid: int, request: Request, token: str | None = Query(default=None)):
     pt = await _auth_pull(token, request.headers.get("Authorization"))
@@ -66,7 +73,7 @@ async def m3u_for_rule(rid: int, request: Request, token: str | None = Query(def
         cache = await s.get(ScanCache, rule.source_id)
         if cache is None:
             raise HTTPException(409, "source not yet scanned")
-    entries = _load_entries(cache.entries_jsonl_path)
+    entries = await _load_entries(cache.entries_jsonl_path)
     eids = [entry_id(rule.source_id, e["path"]) for e in entries]
     filtered = filter_entries(entries, rule.include_exts, rule.exclude_keywords, rule.include_paths)
     keep = {e["path"] for e in filtered}
@@ -119,7 +126,7 @@ async def m3u_for_source_group(
         cache = await s.get(ScanCache, sid)
         if cache is None:
             raise HTTPException(409, "source not yet scanned")
-    entries = _load_entries(cache.entries_jsonl_path)
+    entries = await _load_entries(cache.entries_jsonl_path)
     prefix = group.strip("/") + "/"
     sub = [e for e in entries if e["path"].startswith(prefix)]
     eids = [entry_id(sid, e["path"]) for e in sub]
@@ -179,14 +186,37 @@ async def proxy(
             "Content-Length": str(size),
         })
 
-    async def gen_range():
+    rng_result = adapter.open_range(entry["path"], rng.start, rng.end)
+    if asyncio.iscoroutine(rng_result):
+        rng_result = await rng_result
+    range_supported, gen = rng_result
+
+    if not range_supported:
+        # Upstream ignored Range; serve the full body with 200.
+        async def gen_full_via_iter():
+            try:
+                async for chunk in gen:
+                    yield chunk
+            finally:
+                try:
+                    await adapter.aclose()
+                except Exception:
+                    pass
+        return StreamingResponse(gen_full_via_iter(), status_code=200, media_type=ctype, headers={
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(size),
+        })
+
+    async def gen_range_via_iter():
         try:
-            async for chunk in adapter.open_range(entry["path"], rng.start, rng.end):
+            async for chunk in gen:
                 yield chunk
         finally:
-            try: await adapter.aclose()
-            except Exception: pass
-    return StreamingResponse(gen_range(), status_code=206, media_type=ctype, headers={
+            try:
+                await adapter.aclose()
+            except Exception:
+                pass
+    return StreamingResponse(gen_range_via_iter(), status_code=206, media_type=ctype, headers={
         "Accept-Ranges": "bytes",
         "Content-Range": f"bytes {rng.start}-{rng.end}/{size}",
         "Content-Length": str(rng.length),

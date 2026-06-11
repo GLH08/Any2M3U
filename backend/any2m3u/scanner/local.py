@@ -38,18 +38,25 @@ class LocalAdapter:
         loop = asyncio.get_running_loop()
 
         def _pump() -> None:
+            err: BaseException | None = None
             try:
                 for entry in self._iter(start):
                     loop.call_soon_threadsafe(q.put, entry)
+            except BaseException as e:  # noqa: BLE001
+                err = e
             finally:
-                loop.call_soon_threadsafe(q.put, _SENTINEL)
+                loop.call_soon_threadsafe(
+                    q.put, err if err is not None else _SENTINEL
+                )
 
         loop.run_in_executor(None, _pump)
         while True:
-            entry = await loop.run_in_executor(None, q.get)
-            if entry is _SENTINEL:
+            item = await loop.run_in_executor(None, q.get)
+            if item is _SENTINEL:
                 return
-            yield entry  # type: ignore[misc]
+            if isinstance(item, BaseException):
+                raise item
+            yield item  # type: ignore[misc]
 
     def _iter(self, start: Path) -> Iterator[FileEntry]:
         """Walk `start` and yield FileEntry rows lazily.
@@ -77,29 +84,32 @@ class LocalAdapter:
                     continue
                 yield FileEntry(path=rel, size=st.st_size, mtime=st.st_mtime)
 
-    async def open_range(self, path: str, start: int, end: int | None) -> AsyncIterator[bytes]:
-        full = self._resolve(path)
-        if not full.is_file():
-            raise FileNotFoundError(path)
-
-        import aiofiles
-        async with aiofiles.open(full, "rb") as f:
-            await f.seek(start)
-            remaining = (end - start + 1) if end is not None else None
-            chunk = 64 * 1024
-            while True:
-                if remaining is not None and remaining <= 0:
-                    break
-                size = chunk if remaining is None else min(chunk, remaining)
-                data = await f.read(size)
-                if not data:
-                    break
-                if remaining is not None:
-                    remaining -= len(data)
-                yield data
+    async def open_range(self, path: str, start: int, end: int | None) -> tuple[bool, AsyncIterator[bytes]]:
+        """Return (range_supported, iterator). Local files always honor Range."""
+        async def _gen() -> AsyncIterator[bytes]:
+            full = self._resolve(path)
+            if not full.is_file():
+                raise FileNotFoundError(path)
+            import aiofiles
+            async with aiofiles.open(full, "rb") as f:
+                await f.seek(start)
+                remaining = (end - start + 1) if end is not None else None
+                chunk = 64 * 1024
+                while True:
+                    if remaining is not None and remaining <= 0:
+                        break
+                    size = chunk if remaining is None else min(chunk, remaining)
+                    data = await f.read(size)
+                    if not data:
+                        break
+                    if remaining is not None:
+                        remaining -= len(data)
+                    yield data
+        return (True, _gen())
 
     async def open_full(self, path: str) -> AsyncIterator[bytes]:
-        async for c in self.open_range(path, 0, None):
+        _, gen = await self.open_range(path, 0, None)
+        async for c in gen:
             yield c
 
     async def ping(self) -> None:

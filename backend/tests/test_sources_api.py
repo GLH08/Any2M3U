@@ -21,3 +21,27 @@ async def test_source_crud(tmp_path, monkeypatch):
             assert r3.json()["name"] == "y"
             r4 = await c.delete(f"/api/sources/{sid}")
             assert r4.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_delete_source_removes_disk_cache(tmp_path, monkeypatch):
+    """Deleting a source must remove its scan/{sid}.jsonl file."""
+    monkeypatch.setenv("ANY2M3U_DATA", str(tmp_path))
+    monkeypatch.setenv("ANY2M3U_ADMIN_PASSWORD", "secret123")
+    app = create_app()
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            await c.post("/api/auth/login", json={"username": "admin", "password": "secret123"})
+            r = await c.post("/api/sources", json={
+                "name": "x", "type": "local", "config": {"path": str(tmp_path)},
+            })
+            sid = r.json()["id"]
+            from any2m3u.config import get_settings
+            cache_dir = get_settings().scan_dir
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            cache_file = cache_dir / f"{sid}.jsonl"
+            cache_file.write_text('{"path": "f.mp4", "size": 1, "mtime": 0}\n')
+            assert cache_file.exists()
+            r = await c.delete(f"/api/sources/{sid}")
+            assert r.status_code == 204
+            assert not cache_file.exists()

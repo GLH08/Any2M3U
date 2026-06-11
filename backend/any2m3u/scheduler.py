@@ -60,16 +60,44 @@ def remove_job_for_source(source_id: int) -> None:
 
 
 async def register_all() -> None:
-    """Register a cron job for every enabled source that has a refresh_cron."""
+    """Register a cron job for every enabled source that has a refresh_cron.
+
+    Also removes orphan scan-* jobs whose source no longer exists or is
+    disabled, so a crash-restart doesn't leave stale jobs firing.
+    """
+    sched = _ensure_scheduler()
+    active_sids: set[int] = set()
     sm = get_sessionmaker()
     async with sm() as s:
         rows = (await s.execute(
             select(Source).where(Source.enabled == 1)
         )).scalars().all()
         for src in rows:
-            if not src.refresh_cron:
+            active_sids.add(src.id)
+            if src.refresh_cron:
+                add_job_for_source(src.id, src.refresh_cron)
+    # Garbage-collect orphan jobs.
+    for job in list(sched.get_jobs()):
+        if job.id and job.id.startswith("scan-"):
+            try:
+                sid = int(job.id[len("scan-"):])
+            except ValueError:
                 continue
-            add_job_for_source(src.id, src.refresh_cron)
+            if sid not in active_sids:
+                sched.remove_job(job.id)
+
+
+def sync_source_schedule(source_id: int, enabled: bool, cron_expr: str | None) -> None:
+    """Ensure the scheduler reflects the given source's intended state.
+
+    Centralizes the 'enabled + has cron → install, else uninstall' policy
+    so create/update/delete endpoints don't repeat it. Safe to call from
+    any state — handles None, empty, and stale cases.
+    """
+    if enabled and cron_expr:
+        add_job_for_source(source_id, cron_expr)
+    else:
+        remove_job_for_source(source_id)
 
 
 def shutdown() -> None:
