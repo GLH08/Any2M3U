@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus, Edit, Delete, Connection, Document, CopyDocument } from '@element-plus/icons-vue'
 import { api } from '@/api'
 import RuleForm from '@/components/RuleForm.vue'
 import ScanProgress from '@/components/ScanProgress.vue'
@@ -8,6 +10,7 @@ import type { SourceOut, RuleOut } from '@/types'
 const props = defineProps<{ id: string | number }>()
 const source = ref<SourceOut | null>(null)
 const rules = ref<RuleOut[]>([])
+const tokens = ref<any[]>([])
 const show = ref(false)
 const editing = ref<any>(null)
 const baseUrl = ref('')
@@ -17,6 +20,8 @@ async function refresh() {
   source.value = r.data
   const rr = await api.get(`/api/sources/${props.id}/rules`)
   rules.value = rr.data
+  const tk = await api.get('/api/tokens')
+  tokens.value = tk.data.filter((t: any) => !t.revoked)
 }
 onMounted(async () => {
   await refresh()
@@ -28,43 +33,93 @@ function editRule(r: RuleOut) { editing.value = r; show.value = true }
 async function saveRule(form: any) {
   if (editing.value?.id) await api.patch(`/api/rules/${editing.value.id}`, form)
   else await api.post(`/api/sources/${props.id}/rules`, form)
+  ElMessage.success('已保存')
   show.value = false; await refresh()
 }
 async function delRule(r: RuleOut) {
-  await api.delete(`/api/rules/${r.id}`); await refresh()
+  await ElMessageBox.confirm(`确定删除规则「${r.name}」？`, '确认', { type: 'warning' })
+  await api.delete(`/api/rules/${r.id}`)
+  ElMessage.success('已删除')
+  await refresh()
 }
-async function scan() {
-  await api.post(`/api/sources/${props.id}/scan`)
+
+function m3uUrl(rid: number, token: string) {
+  return `${baseUrl.value}/m3u/rule/${rid}?token=${token}`
 }
-const m3uUrl = (rid: number) => `${baseUrl.value}/m3u/rule/${rid}?token=<token>`
+
+async function copy(text: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+    ElMessage.success('已复制到剪贴板')
+  } catch { /* ignore */ }
+}
 </script>
 <template>
   <div v-if="source">
-    <h2>{{ source.name }} <el-tag size="small">{{ source.type }}</el-tag></h2>
-    <el-card>
+    <h1 class="page-title">
+      <span>{{ source.name }}</span>
+      <el-tag :type="source.type === 'webdav' ? 'warning' : 'success'" effect="dark">
+        {{ source.type === 'webdav' ? 'WebDAV' : '本地' }}
+      </el-tag>
+    </h1>
+
+    <el-card style="margin-bottom:16px">
       <ScanProgress :source-id="Number(id)" />
-      <div style="margin-top:8px"><el-button @click="scan" type="primary">Scan now</el-button></div>
     </el-card>
-    <h3>Rules</h3>
-    <el-button @click="addRule" type="primary" size="small">Add rule</el-button>
-    <el-table :data="rules" border style="margin-top:8px">
+
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px">
+      <h2 style="margin:0; font-size:18px">订阅规则</h2>
+      <el-button type="primary" :icon="Plus" @click="addRule">添加规则</el-button>
+    </div>
+
+    <div v-if="rules.length === 0" class="empty">
+      <el-icon style="font-size:48px; color:var(--ink-300)"><Connection /></el-icon>
+      <h3>还没有规则</h3>
+      <p>规则定义了如何从该媒体源生成 M3U 订阅</p>
+    </div>
+
+    <el-table v-else :data="rules" border>
       <el-table-column prop="id" label="ID" width="60" />
-      <el-table-column prop="name" label="Name" />
-      <el-table-column prop="include_exts" label="Exts" />
-      <el-table-column prop="group_title" label="Group" />
-      <el-table-column label="M3U URL">
+      <el-table-column prop="name" label="规则" min-width="120" />
+      <el-table-column label="后缀" width="120">
         <template #default="{ row }">
-          <code>{{ m3uUrl(row.id) }}</code>
+          <span v-if="row.include_exts" style="font-size:12px">{{ row.include_exts }}</span>
+          <span v-else style="color:var(--ink-400)">全部</span>
         </template>
       </el-table-column>
-      <el-table-column label="Actions" width="200">
+      <el-table-column label="分组" width="120">
         <template #default="{ row }">
-          <el-button size="small" @click="editRule(row as RuleOut)">Edit</el-button>
-          <el-button size="small" type="danger" @click="delRule(row as RuleOut)">Delete</el-button>
+          <el-tag v-if="row.group_title" size="small">{{ row.group_title }}</el-tag>
+          <span v-else style="color:var(--ink-400)">—</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="M3U 订阅链接" min-width="280">
+        <template #default="{ row }">
+          <el-select
+            v-if="tokens.length > 0"
+            :model-value="tokens[0].token"
+            placeholder="选择 Token"
+            size="small"
+            style="width:200px; margin-right:8px"
+            @change="(t: string) => copy(m3uUrl(row.id, t))"
+          >
+            <el-option v-for="t in tokens" :key="t.id" :label="t.name" :value="t.token" />
+          </el-select>
+          <el-button size="small" :icon="CopyDocument" @click="copy(m3uUrl(row.id, tokens[0]?.token || ''))">
+            复制
+          </el-button>
+          <div class="m3u-url" style="margin-top:6px">{{ m3uUrl(row.id, tokens[0]?.token || '⟨需要 Token⟩') }}</div>
+        </template>
+      </el-table-column>
+      <el-table-column label="操作" width="160" fixed="right">
+        <template #default="{ row }">
+          <el-button size="small" :icon="Edit" @click="editRule(row as RuleOut)">编辑</el-button>
+          <el-button size="small" :icon="Delete" type="danger" @click="delRule(row as RuleOut)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
-    <el-dialog v-model="show" title="Rule" width="720px">
+
+    <el-dialog v-model="show" :title="editing?.id ? '编辑规则' : '添加规则'" width="780px">
       <RuleForm :model-value="editing" @submit="saveRule" @cancel="show=false" />
     </el-dialog>
   </div>

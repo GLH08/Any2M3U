@@ -8,6 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..deps import current_user, db_session
 from ..models import ScanCache, Source, User
 from ..schemas import (
+    DiagnoseRequest,
+    DiagnoseResponse,
     ScanStatusResponse,
     SourceCreate,
     SourceOut,
@@ -95,6 +97,79 @@ async def test_source(sid: int, _: User = Depends(current_user), s: AsyncSession
         if adapter is not None:
             try: await adapter.aclose()
             except Exception: pass
+
+
+@router.post("/{sid}/diagnose", response_model=DiagnoseResponse)
+async def diagnose_source(sid: int, body: DiagnoseRequest | None = None, _: User = Depends(current_user), s: AsyncSession = Depends(db_session)):
+    """Issue a single PROPFIND at the root_path and return raw request/response
+    plus the parsed top-level entries. This helps users debug misconfigured
+    WebDAV paths without running a full scan.
+    """
+    import httpx
+    from ..scanner.webdav import WebDAVAdapter
+    src = await s.get(Source, sid)
+    if not src: raise HTTPException(404, "not found")
+    if src.type != "webdav":
+        return DiagnoseResponse(ok=False, error="diagnose only supported for webdav sources")
+    cfg = json.loads(src.config_json)
+    if body and body.config:
+        cfg.update(body.config)  # allow one-off override
+    start = time.time()
+    a = WebDAVAdapter(cfg["url"], cfg["username"], cfg["password"],
+                     root_path=cfg.get("root_path", "/"), verify_tls=cfg.get("verify_tls", True))
+    try:
+        client = await a._ensure_client()
+        prefix = a.root_path.rstrip("/")
+        url = f"{a.base_url}{prefix}/" if prefix else f"{a.base_url}/"
+        request_info = {
+            "method": "PROPFIND",
+            "url": url,
+            "headers": {"Depth": "0", "Authorization": "Basic <redacted>"},
+        }
+        try:
+            r = await client.request("PROPFIND", url, headers={"Depth": "0"})
+        except httpx.HTTPError as e:
+            return DiagnoseResponse(ok=False, error=f"network error: {e}",
+                                   latency_ms=int((time.time()-start)*1000),
+                                   request=request_info)
+        latency = int((time.time()-start)*1000)
+        body_text = r.text[:8000] if r.text else ""
+        parsed: list[dict] = []
+        if r.status_code in (401, 403):
+            return DiagnoseResponse(ok=False, error=f"auth failed (HTTP {r.status_code})",
+                                   latency_ms=latency, request=request_info,
+                                   response_status=r.status_code,
+                                   response_headers=dict(r.headers),
+                                   response_body=body_text)
+        if r.status_code >= 400:
+            return DiagnoseResponse(ok=False, error=f"HTTP {r.status_code}",
+                                   latency_ms=latency, request=request_info,
+                                   response_status=r.status_code,
+                                   response_headers=dict(r.headers),
+                                   response_body=body_text)
+        # Now do a Depth:1 PROPFIND to see actual children
+        r2 = await client.request("PROPFIND", url, headers={"Depth": "1"})
+        body_text2 = r2.text[:8000] if r2.text else ""
+        # Parse via the adapter's own parser
+        try:
+            import xml.etree.ElementTree as ET
+            NS = {"d": "DAV:"}
+            root_el = ET.fromstring(r2.content)
+            files, subdirs = a._parse_responses(root_el, "")
+            for f in files:
+                parsed.append({"path": f["path"], "size": f["size"], "is_dir": False})
+            for sd in subdirs:
+                parsed.append({"path": sd, "size": 0, "is_dir": True})
+        except Exception as e:
+            parsed = [{"error": f"parse failed: {e}"}]
+        return DiagnoseResponse(
+            ok=True, latency_ms=latency, request=request_info,
+            response_status=r2.status_code,
+            response_headers=dict(r2.headers),
+            response_body=body_text2, parsed_entries=parsed,
+        )
+    finally:
+        await a.aclose()
 
 
 @router.post("/{sid}/scan")

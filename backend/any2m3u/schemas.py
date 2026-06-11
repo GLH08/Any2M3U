@@ -130,3 +130,19 @@ class SourceTestResponse(BaseModel):
     ok: bool
     error: Optional[str] = None
     latency_ms: int = 0
+
+
+class DiagnoseRequest(BaseModel):
+    """Optional override of the stored config; if absent, uses the saved one."""
+    config: Optional[dict] = None
+
+
+class DiagnoseResponse(BaseModel):
+    ok: bool
+    latency_ms: int = 0
+    error: Optional[str] = None
+    request: Optional[dict] = None       # {method, url, headers} actually sent
+    response_status: Optional[int] = None
+    response_headers: Optional[dict] = None
+    response_body: Optional[str] = None  # raw XML/text (truncated)
+    parsed_entries: list[dict] = []      # top-level files found in this PROPFIND
