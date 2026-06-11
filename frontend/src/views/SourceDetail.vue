@@ -59,8 +59,8 @@ const m3uUrl = (rid: number) => `${baseUrl.value}/m3u/rule/${rid}?token=<token>`
       </el-table-column>
       <el-table-column label="Actions" width="200">
         <template #default="{ row }">
-          <el-button size="small" @click="editRule(row)">Edit</el-button>
-          <el-button size="small" type="danger" @click="delRule(row)">Delete</el-button>
+          <el-button size="small" @click="editRule(row as RuleOut)">Edit</el-button>
+          <el-button size="small" type="danger" @click="delRule(row as RuleOut)">Delete</el-button>
         </template>
       </el-table-column>
     </el-table>

@@ -21,5 +21,19 @@ export default defineConfig({
       '/m3u': { target: 'http://localhost:8000', changeOrigin: true },
       '/proxy': { target: 'http://localhost:8000', changeOrigin: true }
     }
+  },
+  build: {
+    // Split vendor chunks so Element Plus and Vue don't bloat the main bundle.
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-vue': ['vue', 'vue-router', 'pinia'],
+          'vendor-element': ['element-plus', '@element-plus/icons-vue'],
+          'vendor-utils': ['axios']
+        }
+      }
+    },
+    // Bump warning threshold since Element Plus is large.
+    chunkSizeWarningLimit: 800
   }
 })

@@ -43,10 +43,10 @@ async function test(s: SourceOut) {
       <el-table-column prop="last_scan_status" label="Last scan" width="120" />
       <el-table-column label="Actions" width="360">
         <template #default="{ row }">
-          <el-button size="small" @click="test(row)">Test</el-button>
-          <el-button size="small" @click="edit(row)">Edit</el-button>
-          <el-button size="small" type="danger" @click="remove(row)">Delete</el-button>
-          <el-button size="small" @click="$router.push(`/sources/${row.id}`)">Open</el-button>
+          <el-button size="small" @click="test(row as SourceOut)">Test</el-button>
+          <el-button size="small" @click="edit(row as SourceOut)">Edit</el-button>
+          <el-button size="small" type="danger" @click="remove(row as SourceOut)">Delete</el-button>
+          <el-button size="small" @click="$router.push(`/sources/${(row as SourceOut).id}`)">Open</el-button>
         </template>
       </el-table-column>
     </el-table>
