@@ -38,18 +38,25 @@ class LocalAdapter:
         loop = asyncio.get_running_loop()
 
         def _pump() -> None:
+            err: BaseException | None = None
             try:
                 for entry in self._iter(start):
                     loop.call_soon_threadsafe(q.put, entry)
+            except BaseException as e:  # noqa: BLE001
+                err = e
             finally:
-                loop.call_soon_threadsafe(q.put, _SENTINEL)
+                loop.call_soon_threadsafe(
+                    q.put, err if err is not None else _SENTINEL
+                )
 
         loop.run_in_executor(None, _pump)
         while True:
-            entry = await loop.run_in_executor(None, q.get)
-            if entry is _SENTINEL:
+            item = await loop.run_in_executor(None, q.get)
+            if item is _SENTINEL:
                 return
-            yield entry  # type: ignore[misc]
+            if isinstance(item, BaseException):
+                raise item
+            yield item  # type: ignore[misc]
 
     def _iter(self, start: Path) -> Iterator[FileEntry]:
         """Walk `start` and yield FileEntry rows lazily.

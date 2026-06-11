@@ -63,3 +63,22 @@ async def test_open_range(tmp_path):
     async for c in gen:
         chunks.append(c)
     assert b"".join(chunks) == b"2345"
+
+
+@pytest.mark.asyncio
+async def test_list_propagates_worker_exception(tmp_path):
+    """If the worker thread that drives the file walk raises, the async
+    generator should re-raise — not silently produce a partial stream."""
+    from unittest.mock import patch
+    a = LocalAdapter(str(tmp_path))
+    (tmp_path / "ok.mp4").write_bytes(b"x")
+
+    def boom(start):
+        raise OSError("simulated EIO")
+        yield  # pragma: no cover
+
+    with patch.object(a, "_iter", boom):
+        gen = a.list()
+        with pytest.raises(OSError, match="simulated EIO"):
+            async for _ in gen:
+                pass
