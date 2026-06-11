@@ -44,13 +44,18 @@ async def _bootstrap_admin() -> None:
         log.warning("=" * 60)
         log.warning("Any2M3U initial admin password: %s", pw)
         log.warning("=" * 60)
+    from sqlalchemy.exc import IntegrityError
     async with sm() as sess:
         sess.add(User(
             username="admin",
             password_hash=hash_password(pw),
             created_at=utcnow_iso(),
         ))
-        await sess.commit()
+        try:
+            await sess.commit()
+        except IntegrityError:
+            # Another worker raced us and inserted 'admin' first. That's fine.
+            await sess.rollback()
 
 
 @asynccontextmanager
