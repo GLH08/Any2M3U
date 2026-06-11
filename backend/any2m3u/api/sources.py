@@ -84,7 +84,17 @@ async def delete_source(sid: int, _: User = Depends(current_user), s: AsyncSessi
     if not src: raise HTTPException(404, "not found")
     remove_job_for_source(sid)
     from ..scanner.engine import remove_source_from_index
-    remove_source_from_index(sid)
+    await remove_source_from_index(sid)
+    # Also remove the on-disk scan cache files (and any leftover .tmp).
+    from ..config import get_settings
+    scan_dir = get_settings().scan_dir
+    for ext in (".jsonl", ".jsonl.tmp"):
+        p = scan_dir / f"{sid}{ext}"
+        if p.exists():
+            try:
+                p.unlink()
+            except OSError:
+                pass
     await s.delete(src); await s.commit()
 
 
