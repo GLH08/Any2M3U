@@ -10,6 +10,7 @@ from .api import sources as sources_api
 from .api import rules as rules_api
 from .api import tokens as tokens_api
 from .api import scan as scan_api
+from .api import public as public_api
 from .config import get_settings
 from .db import get_sessionmaker, init_db
 from .models import User
@@ -64,6 +65,7 @@ def create_app() -> FastAPI:
     app.include_router(rules_api.router)
     app.include_router(tokens_api.router)
     app.include_router(scan_api.router)
+    app.include_router(public_api.router)
 
     @app.get("/api/health")
     async def health():
