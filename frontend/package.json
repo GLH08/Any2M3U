@@ -1,0 +1,27 @@
+{
+  "name": "any2m3u-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "axios": "^1.7",
+    "element-plus": "^2.8",
+    "pinia": "^2.2",
+    "vue": "^3.5",
+    "vue-router": "^4.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@vitejs/plugin-vue": "^5.1",
+    "typescript": "^5.5",
+    "unplugin-auto-import": "^0.18",
+    "unplugin-vue-components": "^0.27",
+    "vite": "^5.4",
+    "vue-tsc": "^2.1"
+  }
+}
