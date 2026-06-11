@@ -75,7 +75,16 @@ const filtered = () => {
 
       <el-table :data="filtered()" border>
         <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column prop="name" label="名称" min-width="140" />
+        <el-table-column label="名称" min-width="180">
+          <template #default="{ row }">
+            <router-link :to="`/sources/${row.id}`" style="color:var(--brand-700); font-weight:500; text-decoration:none">
+              {{ row.name }}
+            </router-link>
+            <div v-if="row.last_error" style="color:var(--danger); font-size:11px; margin-top:2px; max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap" :title="row.last_error">
+              {{ row.last_error }}
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="类型" width="100">
           <template #default="{ row }">
             <el-tag :type="row.type === 'webdav' ? 'warning' : 'success'" size="small">
@@ -84,15 +93,12 @@ const filtered = () => {
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="200">
+        <el-table-column label="状态" width="120">
           <template #default="{ row }">
             <el-tag v-if="row.last_scan_status === 'success'" type="success" size="small">扫描成功</el-tag>
             <el-tag v-else-if="row.last_scan_status === 'failed'" type="danger" size="small">扫描失败</el-tag>
             <el-tag v-else-if="row.last_scan_status === 'running'" type="warning" size="small">扫描中</el-tag>
             <el-tag v-else size="small" type="info">未扫描</el-tag>
-            <div v-if="row.last_error" style="color:var(--danger); font-size:11px; margin-top:4px; max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap" :title="row.last_error">
-              {{ row.last_error }}
-            </div>
           </template>
         </el-table-column>
         <el-table-column prop="last_scan_at" label="最近扫描" width="180">
@@ -101,8 +107,9 @@ const filtered = () => {
             <span v-else style="color:var(--ink-400)">—</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="380" fixed="right">
+        <el-table-column label="操作" width="500" fixed="right">
           <template #default="{ row }">
+            <el-button size="small" type="primary" @click="$router.push(`/sources/${row.id}`)">订阅规则</el-button>
             <el-button size="small" :icon="QuestionFilled" @click="diagnose(row as SourceOut)">诊断</el-button>
             <el-button size="small" :icon="Search" @click="test(row as SourceOut)">测试</el-button>
             <el-button size="small" :icon="Edit" @click="edit(row as SourceOut)">编辑</el-button>
