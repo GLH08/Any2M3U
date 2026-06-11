@@ -1,11 +1,11 @@
 from __future__ import annotations
-from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from ..deps import current_user, db_session
 from ..models import Rule, Source, User
 from ..schemas import RuleCreate, RuleOut, RuleUpdate
+from ..utils.dates import utcnow_iso
 
 router = APIRouter(tags=["rules"])
 
@@ -35,7 +35,7 @@ async def create_rule(sid: int, body: RuleCreate, _: User = Depends(current_user
         exclude_keywords=body.exclude_keywords, include_paths=body.include_paths,
         group_title=body.group_title, tpl=body.tpl, logo_dir=body.logo_dir,
         enabled=1 if body.enabled else 0,
-        created_at=datetime.now(timezone.utc).isoformat(),
+        created_at=utcnow_iso(),
     )
     s.add(r); await s.commit(); await s.refresh(r)
     return _to_out(r)
