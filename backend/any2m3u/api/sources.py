@@ -74,6 +74,8 @@ async def update_source(sid: int, body: SourceUpdate, _: User = Depends(current_
 async def delete_source(sid: int, _: User = Depends(current_user), s: AsyncSession = Depends(db_session)):
     src = await s.get(Source, sid)
     if not src: raise HTTPException(404, "not found")
+    from ..scanner.engine import remove_source_from_index
+    remove_source_from_index(sid)
     await s.delete(src); await s.commit()
 
 

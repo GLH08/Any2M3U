@@ -58,6 +58,13 @@ def get_progress(source_id: int) -> int:
     return _progress.get(source_id, 0)
 
 
+def remove_source_from_index(source_id: int) -> None:
+    """Drop a source's entries from both _index and _eid_to_entry."""
+    _index.pop(source_id, None)
+    _progress.pop(source_id, None)
+    _rebuild_global_index()
+
+
 def entry_id(source_id: int, path: str) -> str:
     return hashlib.sha1(f"{source_id}:{path}".encode("utf-8")).hexdigest()[:32]
 

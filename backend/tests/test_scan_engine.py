@@ -92,3 +92,39 @@ async def test_global_eid_map_populated_after_scan(tmp_path):
     assert found[1]["path"] == "f.mp4"
     # unknown ids return None, not exceptions
     assert lookup_entry("deadbeef" * 8) is None
+
+
+@pytest.mark.asyncio
+async def test_rescan_drops_stale_eids_from_global_map(tmp_path):
+    """A rescan with fewer files should remove eids for deleted files."""
+    from datetime import datetime, timezone
+    from any2m3u.scanner.engine import lookup_entry, entry_id
+    data = tmp_path / "data"; data.mkdir()
+    media = tmp_path / "media"
+    media.mkdir()
+    (media / "a.mp4").write_bytes(b"x")
+    (media / "b.mp4").write_bytes(b"y")
+    os.environ["ANY2M3U_DATA"] = str(data)
+    from any2m3u.config import get_settings
+    get_settings.cache_clear()
+    await init_db(data)
+    sm = get_sessionmaker()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    async with sm() as s:
+        src = Source(name="m", type="local",
+                     config_json=json.dumps({"path": str(media)}), created_at=now_iso)
+        s.add(src); await s.commit(); await s.refresh(src)
+        sid = src.id
+
+    # First scan: both files
+    await scan(sid)
+    eid_a = entry_id(sid, "a.mp4")
+    eid_b = entry_id(sid, "b.mp4")
+    assert lookup_entry(eid_a) is not None
+    assert lookup_entry(eid_b) is not None
+
+    # Delete one file and rescan
+    (media / "b.mp4").unlink()
+    await scan(sid)
+    assert lookup_entry(eid_a) is not None  # still there
+    assert lookup_entry(eid_b) is None        # dropped
