@@ -46,9 +46,9 @@ async def login(body: LoginBody, request: Request, response: Response, s: AsyncS
 
 
 @router.post("/logout", status_code=204)
-async def logout(response: Response, sid: str | None = Cookie(default=None, alias=COOKIE_NAME), s: AsyncSession = Depends(db_session)):
-    if sid:
-        row = await s.get(DBSession, sid)
+async def logout(response: Response, session_id: str | None = Cookie(default=None, alias=COOKIE_NAME), s: AsyncSession = Depends(db_session)):
+    if session_id:
+        row = await s.get(DBSession, session_id)
         if row:
             await s.delete(row)
             await s.commit()

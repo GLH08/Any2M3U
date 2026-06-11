@@ -19,12 +19,12 @@ async def db_session() -> AsyncSession:  # type: ignore[override]
 
 async def current_user(
     request: Request,
-    sid: str | None = Cookie(default=None, alias=COOKIE_NAME),
+    session_id: str | None = Cookie(default=None, alias=COOKIE_NAME),
     s: AsyncSession = Depends(db_session),
 ) -> User:
-    if not sid:
+    if not session_id:
         raise HTTPException(status_code=401, detail="no session")
-    row = await s.get(DBSession, sid)
+    row = await s.get(DBSession, session_id)
     if row is None:
         raise HTTPException(status_code=401, detail="invalid session")
     expires = datetime.fromisoformat(row.expires_at)
