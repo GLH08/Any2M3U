@@ -1,0 +1,20 @@
+services:
+  any2m3u:
+    build: .
+    image: any2m3u:latest
+    container_name: any2m3u
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./data:/data
+      - /path/to/your/media:/media:ro
+    environment:
+      - ANY2M3U_ADMIN_PASSWORD=
+      - ANY2M3U_BASE_URL=https://your.domain
+      - ANY2M3U_LOG_LEVEL=INFO
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
