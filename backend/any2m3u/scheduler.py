@@ -87,6 +87,19 @@ async def register_all() -> None:
                 sched.remove_job(job.id)
 
 
+def sync_source_schedule(source_id: int, enabled: bool, cron_expr: str | None) -> None:
+    """Ensure the scheduler reflects the given source's intended state.
+
+    Centralizes the 'enabled + has cron → install, else uninstall' policy
+    so create/update/delete endpoints don't repeat it. Safe to call from
+    any state — handles None, empty, and stale cases.
+    """
+    if enabled and cron_expr:
+        add_job_for_source(source_id, cron_expr)
+    else:
+        remove_job_for_source(source_id)
+
+
 def shutdown() -> None:
     global _scheduler
     if _scheduler is not None:
