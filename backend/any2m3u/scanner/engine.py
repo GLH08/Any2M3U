@@ -23,6 +23,10 @@ _progress: dict[int, int] = {}
 _index: dict[int, dict[str, FileEntry]] = {}
 _sema = asyncio.Semaphore(1)
 
+# Flat global map for O(1) proxy lookup by entry id.
+# Populated on every successful scan and on load_all_indexes().
+_eid_to_entry: dict[str, tuple[int, FileEntry]] = {}
+
 
 def is_index_loaded(source_id: int) -> bool:
     return source_id in _index
@@ -30,6 +34,24 @@ def is_index_loaded(source_id: int) -> bool:
 
 def load_index(source_id: int) -> dict[str, FileEntry]:
     return _index.get(source_id, {})
+
+
+def lookup_entry(eid: str) -> tuple[int, FileEntry] | None:
+    """O(1) lookup of (source_id, entry) by entry id. Returns None if not found."""
+    return _eid_to_entry.get(eid)
+
+
+def _rebuild_global_index() -> None:
+    """Recompute _eid_to_entry from the per-source _index dicts.
+
+    Called after a scan completes and during load_all_indexes.
+    """
+    new_map: dict[str, tuple[int, FileEntry]] = {}
+    for sid, idx in _index.items():
+        for eid, entry in idx.items():
+            new_map[eid] = (sid, entry)
+    _eid_to_entry.clear()
+    _eid_to_entry.update(new_map)
 
 
 def get_progress(source_id: int) -> int:
@@ -132,6 +154,7 @@ async def scan(source_id: int) -> None:
 
         _index[source_id] = new_index
         _progress[source_id] = count
+        _rebuild_global_index()
 
         async with sm() as s:
             existing = await s.get(ScanCache, source_id)
@@ -175,6 +198,7 @@ async def load_all_indexes() -> None:
                 _index[r.source_id] = idx
             except OSError:
                 continue
+    _rebuild_global_index()
 
 
 async def cleanup_tmp_files() -> None:

@@ -61,3 +61,34 @@ async def test_scan_keeps_old_on_failure(tmp_path):
         src = (await s.get(Source, sid))
         assert src.last_scan_status == "failed"
         assert not (data / "scan" / f"{sid}.jsonl").exists()
+
+
+@pytest.mark.asyncio
+async def test_global_eid_map_populated_after_scan(tmp_path):
+    """lookup_entry() should return (sid, entry) after a successful scan."""
+    from datetime import datetime, timezone
+    from any2m3u.scanner.engine import lookup_entry, entry_id
+    data = tmp_path / "data"; data.mkdir()
+    media = tmp_path / "media"
+    media.mkdir()
+    (media / "f.mp4").write_bytes(b"x")
+    os.environ["ANY2M3U_DATA"] = str(data)
+    from any2m3u.config import get_settings
+    get_settings.cache_clear()
+    await init_db(data)
+    sm = get_sessionmaker()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    async with sm() as s:
+        src = Source(name="m", type="local",
+                     config_json=json.dumps({"path": str(media)}), created_at=now_iso)
+        s.add(src); await s.commit(); await s.refresh(src)
+        sid = src.id
+
+    await scan(sid)
+    eid = entry_id(sid, "f.mp4")
+    found = lookup_entry(eid)
+    assert found is not None
+    assert found[0] == sid
+    assert found[1]["path"] == "f.mp4"
+    # unknown ids return None, not exceptions
+    assert lookup_entry("deadbeef" * 8) is None

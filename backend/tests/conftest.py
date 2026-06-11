@@ -26,6 +26,10 @@ def _clear_scanner_state():
     from any2m3u.scanner import engine
     engine._index.clear()
     engine._progress.clear()
+    if hasattr(engine, "_eid_to_entry"):
+        engine._eid_to_entry.clear()
     yield
     engine._index.clear()
     engine._progress.clear()
+    if hasattr(engine, "_eid_to_entry"):
+        engine._eid_to_entry.clear()

@@ -12,7 +12,7 @@ from ..m3u.filters import FileEntry, filter_entries
 from ..m3u.renderer import render_m3u
 from ..models import PullToken, Rule, ScanCache, Source
 from ..proxy.stream import parse_range
-from ..scanner.engine import build_adapter, entry_id, _index
+from ..scanner.engine import build_adapter, entry_id, lookup_entry
 from ..utils.dates import parse_utc, utcnow_iso
 
 router = APIRouter(tags=["public"])
@@ -147,11 +147,7 @@ async def proxy(
     token: str | None = Query(default=None),
 ):
     pt = await _auth_pull(token, request.headers.get("Authorization"))
-    found = None
-    for sid, idx in _index.items():
-        if id in idx:
-            found = (sid, idx[id])
-            break
+    found = lookup_entry(id)
     if found is None:
         raise HTTPException(404, detail={"error": "not_found"})
     sid, entry = found
