@@ -1,0 +1,63 @@
+import json
+import os
+import pytest
+from datetime import datetime
+from any2m3u.db import init_db, get_sessionmaker
+from any2m3u.models import Source
+from any2m3u.scanner.engine import scan, load_index, is_index_loaded
+
+
+@pytest.mark.asyncio
+async def test_scan_local_source(tmp_path):
+    data = tmp_path / "data"; data.mkdir()
+    (tmp_path / "media").mkdir()
+    (tmp_path / "media" / "a.mp4").write_bytes(b"x" * 10)
+    (tmp_path / "media" / "b.mkv").write_bytes(b"y" * 20)
+
+    # Force the settings cache to read our tempdir (conftest clears the cache
+    # only around the test, not before get_settings() is first read).
+    os.environ["ANY2M3U_DATA"] = str(data)
+    from any2m3u.config import get_settings
+    get_settings.cache_clear()
+
+    await init_db(data)
+    sm = get_sessionmaker()
+    now = datetime.utcnow().isoformat()
+    async with sm() as s:
+        src = Source(name="m", type="local", config_json=json.dumps({"path": str(tmp_path / "media")}), created_at=now)
+        s.add(src)
+        await s.commit()
+        await s.refresh(src)
+        sid = src.id
+
+    await scan(sid)
+    cache_path = data / "scan" / f"{sid}.jsonl"
+    assert cache_path.exists()
+    lines = cache_path.read_text().strip().split("\n")
+    assert len(lines) == 2
+    assert is_index_loaded(sid)
+    entries = load_index(sid)
+    assert sum(e["size"] for e in entries.values()) == 30
+
+
+@pytest.mark.asyncio
+async def test_scan_keeps_old_on_failure(tmp_path):
+    data = tmp_path / "data"; data.mkdir()
+    os.environ["ANY2M3U_DATA"] = str(data)
+    from any2m3u.config import get_settings
+    get_settings.cache_clear()
+
+    await init_db(data)
+    sm = get_sessionmaker()
+    now = datetime.utcnow().isoformat()
+    # path that does not exist
+    async with sm() as s:
+        src = Source(name="x", type="local", config_json=json.dumps({"path": str(tmp_path / "missing")}), created_at=now)
+        s.add(src); await s.commit(); await s.refresh(src)
+        sid = src.id
+
+    await scan(sid)
+    async with sm() as s:
+        src = (await s.get(Source, sid))
+        assert src.last_scan_status == "failed"
+        assert not (data / "scan" / f"{sid}.jsonl").exists()

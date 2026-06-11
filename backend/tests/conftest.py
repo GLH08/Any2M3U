@@ -1,10 +1,6 @@
-import asyncio
-import os
-import tempfile
 from pathlib import Path
 
 import pytest
-import pytest_asyncio
 
 
 @pytest.fixture
@@ -13,3 +9,23 @@ def tmp_data_dir(tmp_path: Path) -> Path:
     d = tmp_path / "data"
     d.mkdir()
     return d
+
+
+@pytest.fixture(autouse=True)
+def _clear_settings_cache():
+    """Reset the lru_cache on get_settings so env-var changes take effect per test."""
+    from any2m3u.config import get_settings
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def _clear_scanner_state():
+    """Reset the scanner engine's in-memory indexes between tests."""
+    from any2m3u.scanner import engine
+    engine._index.clear()
+    engine._progress.clear()
+    yield
+    engine._index.clear()
+    engine._progress.clear()
