@@ -3,7 +3,7 @@ import logging
 import posixpath
 import xml.etree.ElementTree as ET
 from typing import AsyncIterator
-from urllib.parse import urlparse, unquote
+from urllib.parse import quote, urlparse, unquote
 import httpx
 from ..m3u.filters import FileEntry
 from .base import UpstreamAuthError, UpstreamError
@@ -44,13 +44,19 @@ class WebDAVAdapter:
             self._client = None
 
     def _file_url(self, rel_path: str) -> str:
-        """Build URL for a file path relative to source root."""
+        """Build URL for a file path relative to source root.
+
+        Each segment is URL-encoded to handle spaces / # / ? / non-ASCII
+        characters found in real-world file names.
+        """
         rel = posixpath.normpath(rel_path).lstrip("/")
         prefix = self.root_path.rstrip("/")
         if prefix == "/":
             prefix = ""
-        if rel:
-            return f"{self.base_url}{prefix}/{rel}"
+        # URL-encode each path segment, keeping / separators
+        encoded = "/".join(quote(seg, safe="") for seg in rel.split("/")) if rel else ""
+        if encoded:
+            return f"{self.base_url}{prefix}/{encoded}"
         return f"{self.base_url}{prefix}/" if prefix else f"{self.base_url}/"
 
     def _dir_url(self, rel_path: str) -> str:
@@ -61,7 +67,8 @@ class WebDAVAdapter:
         prefix = self.root_path.rstrip("/")
         if prefix == "/":
             prefix = ""
-        return f"{self.base_url}{prefix}{rel_path}"
+        encoded = "/".join(quote(seg, safe="") for seg in rel_path.strip("/").split("/")) + "/"
+        return f"{self.base_url}{prefix}/{encoded}"
 
     def _strip_root(self, href: str) -> str:
         path = urlparse(href).path
@@ -184,19 +191,31 @@ class WebDAVAdapter:
                     queue.append(sd)
 
     async def open_range(self, path: str, start: int, end: int | None) -> AsyncIterator[bytes]:
+        """Stream bytes [start:end+1] from a file. If the upstream rejects
+        Range (405/406/501), silently retry without the Range header."""
         client = await self._ensure_client()
         url = self._file_url(path)
         rng = f"bytes={start}-{end}" if end is not None else f"bytes={start}-"
-        try:
-            async with client.stream("GET", url, headers={"Range": rng}) as r:
-                if r.status_code in (401, 403):
-                    raise UpstreamAuthError(f"upstream {r.status_code}")
-                if r.status_code >= 400:
-                    raise UpstreamError(f"upstream {r.status_code}")
-                async for chunk in r.aiter_bytes(chunk_size=64 * 1024):
-                    yield chunk
-        except httpx.HTTPError as e:
-            raise UpstreamError(str(e))
+
+        # First pass: try with Range.  If rejected, retry without.
+        for attempt, headers in enumerate(({"Range": rng}, {})):
+            try:
+                async with client.stream("GET", url, headers=headers) as r:
+                    if r.status_code in (401, 403):
+                        raise UpstreamAuthError(f"upstream {r.status_code}")
+                    if r.status_code in (405, 406, 501) and attempt == 0:
+                        log.info("upstream %s for Range — retrying full GET", r.status_code)
+                        continue  # retry without Range
+                    if r.status_code >= 400:
+                        raise UpstreamError(f"upstream {r.status_code}")
+                    async for chunk in r.aiter_bytes(chunk_size=64 * 1024):
+                        yield chunk
+                    return  # success — stop retry loop
+            except httpx.HTTPError as e:
+                if attempt == 0:
+                    log.info("HTTP error for Range — retrying full GET: %s", e)
+                    continue
+                raise UpstreamError(str(e))
 
     async def open_full(self, path: str) -> AsyncIterator[bytes]:
         client = await self._ensure_client()
