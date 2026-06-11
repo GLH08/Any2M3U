@@ -93,10 +93,11 @@ def create_app() -> FastAPI:
 
         @app.get("/{full_path:path}", include_in_schema=False)
         async def spa_fallback(full_path: str):
-            candidate = s.web_dir / full_path
-            if candidate.is_file():
+            web_root = s.web_dir.resolve()
+            candidate = (web_root / full_path).resolve()
+            if web_root in candidate.parents and candidate.is_file():
                 return FileResponse(candidate)
-            return FileResponse(s.web_dir / "index.html")
+            return FileResponse(web_root / "index.html")
     else:
         log.warning("=" * 60)
         log.warning("Web UI directory not found: %s", s.web_dir)
