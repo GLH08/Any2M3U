@@ -91,10 +91,13 @@ class WebDAVAdapter:
     def _parse_responses(self, root_el: ET.Element, rel_dir: str) -> tuple[list[FileEntry], list[str]]:
         """Parse a Depth:1 PROPFIND response, returning (files, subdirs) DIRECTLY under rel_dir.
 
-        Each response href is normalized: anything whose first segment equals
-        rel_dir is treated as a direct child; anything deeper is ignored (we'll
-        get it when we recurse into the subdir). The directory itself (rel_dir)
-        is also ignored.
+        Logic: a response href whose first segment is rel_dir (or whose path
+        equals rel_dir when rel_dir is empty) is a direct child. Anything
+        deeper is ignored at this level (we'll get it via BFS recursion).
+
+        For rel_dir = "" (root), we treat the FIRST path segment of href as
+        the direct child; this is the standard WebDAV behavior. We then
+        record the subdir's full path under root_path for later PROPFIND.
         """
         prefix = rel_dir.strip("/")
         files: list[FileEntry] = []
@@ -104,23 +107,37 @@ class WebDAVAdapter:
             rel = self._strip_root(href).rstrip("/")
             if not rel:
                 continue
-            # Skip if rel is the directory itself
-            if rel == prefix:
+            # Skip the directory itself
+            if prefix and rel == prefix:
                 continue
-            # Only consider direct children of prefix
+            # Determine the first segment (direct child name) and the tail
             if prefix:
                 if not rel.startswith(prefix + "/"):
                     continue
                 tail = rel[len(prefix) + 1:]
             else:
                 tail = rel
-            # `tail` is a single segment (direct child) — not if it contains '/'
-            if "/" in tail:
+            if "/" not in tail:
+                # Direct child
+                child_name = tail
+            else:
+                # Deeper than direct child — its first segment IS a direct subdir of `prefix`
+                child_name = tail.split("/", 1)[0]
+                # Treat as subdir of prefix (rel = prefix + child_name)
+                if prefix:
+                    child_path = prefix + "/" + child_name
+                else:
+                    child_path = child_name
+                if child_path not in subdirs and child_path != prefix:
+                    subdirs.append(child_path)
                 continue
 
             is_dir = resp.find(".//d:resourcetype/d:collection", NS) is not None
             if is_dir:
-                subdirs.append(rel)
+                if prefix:
+                    subdirs.append(prefix + "/" + child_name)
+                else:
+                    subdirs.append(child_name)
                 continue
 
             size_s = resp.findtext(".//d:getcontentlength", default="0", namespaces=NS)

@@ -194,6 +194,20 @@ async def test_list_through_real_http(webdav_server):
 
 
 @pytest.mark.asyncio
+async def test_list_with_subdir_root_path(webdav_server):
+    """User scenario: base_url is just host, root_path is the full WebDAV path
+    (e.g. Nextcloud /dav/files/admin). Adapter must strip the root_path and
+    treat only the suffix as relative."""
+    a = WebDAVAdapter(webdav_server.base_url, "u", "p", root_path="/Media/Movies")
+    try:
+        paths = sorted([e["path"] async for e in a.list()])
+        # Should find only files under Movies/
+        assert paths == ["a.mp4", "b.mkv"]
+    finally:
+        await a.aclose()
+
+
+@pytest.mark.asyncio
 async def test_auth_failure_through_real_http(webdav_server):
     from any2m3u.scanner.base import UpstreamAuthError
     a = WebDAVAdapter(webdav_server.base_url, "wrong", "wrong", root_path="/Media")
