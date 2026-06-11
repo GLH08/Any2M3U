@@ -54,6 +54,8 @@ async def test_open_range_passthrough(httpx_mock):
     )
     a = WebDAVAdapter("https://dav.example.com", "u", "p", root_path="/Media")
     chunks = []
-    async for c in a.open_range("Movies/a.mp4", 0, 3):
+    supported, gen = await a.open_range("Movies/a.mp4", 0, 3)
+    assert supported is True
+    async for c in gen:
         chunks.append(c)
     assert b"".join(chunks) == b"part"

@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import json
 import mimetypes
 from pathlib import Path
@@ -179,14 +180,37 @@ async def proxy(
             "Content-Length": str(size),
         })
 
-    async def gen_range():
+    rng_result = adapter.open_range(entry["path"], rng.start, rng.end)
+    if asyncio.iscoroutine(rng_result):
+        rng_result = await rng_result
+    range_supported, gen = rng_result
+
+    if not range_supported:
+        # Upstream ignored Range; serve the full body with 200.
+        async def gen_full_via_iter():
+            try:
+                async for chunk in gen:
+                    yield chunk
+            finally:
+                try:
+                    await adapter.aclose()
+                except Exception:
+                    pass
+        return StreamingResponse(gen_full_via_iter(), status_code=200, media_type=ctype, headers={
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(size),
+        })
+
+    async def gen_range_via_iter():
         try:
-            async for chunk in adapter.open_range(entry["path"], rng.start, rng.end):
+            async for chunk in gen:
                 yield chunk
         finally:
-            try: await adapter.aclose()
-            except Exception: pass
-    return StreamingResponse(gen_range(), status_code=206, media_type=ctype, headers={
+            try:
+                await adapter.aclose()
+            except Exception:
+                pass
+    return StreamingResponse(gen_range_via_iter(), status_code=206, media_type=ctype, headers={
         "Accept-Ranges": "bytes",
         "Content-Range": f"bytes {rng.start}-{rng.end}/{size}",
         "Content-Length": str(rng.length),

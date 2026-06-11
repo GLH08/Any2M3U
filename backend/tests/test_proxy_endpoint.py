@@ -108,3 +108,32 @@ async def test_proxy_unknown_entry(app_with_local_source):
     pr = await c.get(f"/proxy?token={token}&id=ffffffffffffffffffffffffffffffff")
     assert pr.status_code == 404
     assert pr.json()["detail"]["error"] == "not_found"
+
+
+@pytest.mark.asyncio
+async def test_proxy_range_fallback_returns_200_when_upstream_ignores_range(
+    app_with_local_source, monkeypatch
+):
+    """When the upstream ignores Range and returns 200, the proxy must
+    also return 200 with Content-Length=full size, not 206 with a
+    mismatched Content-Range."""
+    c, token, rid = app_with_local_source
+    r = await c.get(f"/m3u/rule/{rid}?token={token}")
+    import re
+    eid = re.search(r"id=([a-f0-9]+)", r.text).group(1)
+
+    # Monkey-patch LocalAdapter.open_range to simulate "upstream ignored Range"
+    from any2m3u.scanner import local
+    orig = local.LocalAdapter.open_range
+    async def fake_open_range(self, path, start, end):
+        # Simulate upstream returning 200: yield the whole file and tell the
+        # proxy the range was not honored.
+        _, full_iter = await orig(self, path, 0, None)
+        return (False, full_iter)
+    monkeypatch.setattr(local.LocalAdapter, "open_range", fake_open_range)
+
+    pr = await c.get(f"/proxy?token={token}&id={eid}", headers={"Range": "bytes=10-19"})
+    assert pr.status_code == 200  # NOT 206
+    assert pr.content == b"0123456789" * 10
+    assert "content-range" not in {k.lower() for k in pr.headers.keys()}
+    assert pr.headers["content-length"] == "100"
