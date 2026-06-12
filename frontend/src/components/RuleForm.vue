@@ -4,7 +4,7 @@ import { onMounted, ref } from 'vue'
 const props = defineProps<{ modelValue: any }>()
 const emit = defineEmits<{ (e: 'submit', v: any): void; (e: 'cancel'): void }>()
 
-const DEFAULT_TPL = '#EXTINF:-1 tvg-logo="<logo>" group-title="<group>",<title>\n<base>/proxy?token=<t>&id=<eid>'
+const DEFAULT_TPL = '#EXTINF:-1 group-title="<group>",<title>\n<base>/proxy?token=<t>&id=<eid>'
 
 const form = ref<any>({
   name: '',
@@ -41,17 +41,18 @@ function submit() { emit('submit', form.value) }
     <el-form-item label="分组标题 (group-title)">
       <el-input v-model="form.group_title" placeholder="电影 / 剧集 / 直播 ..." />
     </el-form-item>
-    <el-form-item label="封面目录 (logo_dir)">
-      <el-input v-model="form.logo_dir" placeholder="留空则不输出 tvg-logo" />
+    <el-form-item label="封面 URL 前缀 (logo_dir)">
+      <el-input v-model="form.logo_dir" placeholder="留空则不输出封面" />
       <div style="color:var(--ink-500); font-size:12px; margin-top:4px">
-        媒体源下的封面子目录。播放器拉取 <code>logo_dir/&lt;stem&gt;.jpg</code> 作为封面
+        需填<strong>完整 URL 前缀</strong>（如 <code>https://cdn/posters</code>），并在模板里加 <code>tvg-logo="&lt;logo&gt;"</code>。
+        <code>&lt;logo&gt;</code> 展开为 <code>前缀/&lt;文件名&gt;.jpg</code>。本服务不托管封面图。
       </div>
     </el-form-item>
     <el-form-item label="M3U 模板">
       <el-input v-model="form.tpl" type="textarea" :rows="5" />
       <div style="color:var(--ink-500); font-size:12px; margin-top:4px">
         占位符：<code>&lt;base&gt;</code> 服务地址、<code>&lt;title&gt;</code> 标题、
-        <code>&lt;group&gt;</code> 分组、<code>&lt;logo&gt;</code> 封面、
+        <code>&lt;group&gt;</code> 分组、<code>&lt;logo&gt;</code> 封面（需 logo_dir 填完整 URL 前缀）、
         <code>&lt;t&gt;</code> token、<code>&lt;eid&gt;</code> 条目ID、<code>&lt;sid&gt;</code> 源ID
       </div>
     </el-form-item>
