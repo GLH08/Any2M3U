@@ -28,3 +28,4 @@ backend/data/INITIAL_PASSWORD.txt
 .vscode/
 *.swp
 .DS_Store
+backend/any2m3u/web/
