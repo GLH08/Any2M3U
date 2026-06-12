@@ -79,7 +79,7 @@ docker compose restart
 
 Default template:
 ```
-#EXTINF:-1 tvg-logo="<base>/logo/<sid>/<logo>" group-title="<group>",<title>
+#EXTINF:-1 group-title="<group>",<title>
 <base>/proxy?token=<t>&id=<eid>
 ```
 
@@ -91,7 +91,7 @@ Default template:
 | `<title>` | filename without extension (XML-escaped) |
 | `<eid>` | stable 32-char sha1 of `source_id:path` |
 | `<t>` | the pull token in use |
-| `<logo>` | if `logo_dir` is set: `<logo_dir>/<stem>.jpg`. Otherwise the entire `tvg-logo="…"` attribute is removed. |
+| `<logo>` | `<logo_dir>/<stem>.jpg`. Only useful if `logo_dir` is a **full URL prefix** (e.g. `https://cdn/posters`) — this service does **not** host logo images. If `logo_dir` is empty the entire `tvg-logo="…"` attribute is stripped. To use logos, add `tvg-logo="<logo>"` to a custom template and set `logo_dir` to your image host's URL prefix. |
 
 ## Cron refresh
 
@@ -178,3 +178,7 @@ any2m3u/
 
 - Design: `docs/superpowers/specs/2026-06-11-any2m3u-design.md`
 - Plan:   `docs/superpowers/plans/2026-06-11-any2m3u.md`
+
+## License
+
+MIT — see [LICENSE](LICENSE).

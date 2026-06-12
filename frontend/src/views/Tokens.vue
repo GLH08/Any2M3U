@@ -50,6 +50,15 @@ function fmtTime(s: string | null) {
       <small>播放器订阅 M3U 时使用的长期凭证</small>
     </h1>
 
+    <el-alert
+      type="warning"
+      :closable="false"
+      show-icon
+      style="margin-bottom:16px"
+      title="令牌等同于密码"
+      description="M3U 订阅链接里直接带有令牌（?token=…），任何拿到该链接的人都能拉取你的媒体。请勿公开分享；一旦泄漏，立即在此吊销并换用新令牌。"
+    />
+
     <div v-if="lastCreated" class="token-box">
       <div class="label">⚠️ 请立即复制 — 此令牌只显示一次</div>
       <div class="val">{{ lastCreated.token }}</div>

@@ -60,6 +60,24 @@ def test_render_omits_logo_when_missing():
     assert "tvg-logo" not in lines[1]
 
 
+def test_render_logo_with_absolute_url_prefix():
+    """When logo_dir is a full URL prefix, <logo> must expand to a valid
+    absolute URL that players can actually fetch (this service does not host
+    logos, so relative paths are useless — the URL must be absolute)."""
+    text = render_m3u(
+        entries=[entry("a", "Movies/A.mp4")],
+        entry_ids=["a"],
+        group_title="",
+        logo_lookup=lambda p: "https://cdn.example.com/posters/A.jpg",
+        tpl=(
+            "#EXTINF:-1 tvg-logo=\"<logo>\" group-title=\"<group>\",<title>\n"
+            "<base>/proxy?token=<t>&id=<eid>"
+        ),
+        base_url="http://x", source_id=1, token="T",
+    )
+    assert 'tvg-logo="https://cdn.example.com/posters/A.jpg"' in text
+
+
 def test_render_xml_escapes_group_title():
     text = render_m3u(
         entries=[entry("a", "x.mp4")],

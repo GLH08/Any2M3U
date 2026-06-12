@@ -78,7 +78,17 @@ async function copy(text: string) {
       <p>规则定义了如何从该媒体源生成 M3U 订阅</p>
     </div>
 
-    <el-table v-else :data="rules" border>
+    <el-alert
+      v-if="rules.length > 0"
+      type="warning"
+      :closable="false"
+      show-icon
+      style="margin-bottom:12px"
+      title="订阅链接含令牌，等同于密码"
+      description="下方 M3U 链接的 ?token=… 是访问凭证，请勿公开分享。如需作废，请到「拉取令牌」页吊销。"
+    />
+
+    <el-table v-if="rules.length > 0" :data="rules" border>
       <el-table-column prop="id" label="ID" width="60" />
       <el-table-column prop="name" label="规则" min-width="120" />
       <el-table-column label="后缀" width="120">
